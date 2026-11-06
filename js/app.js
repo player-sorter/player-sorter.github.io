@@ -6,6 +6,11 @@
     MF: "Midfielder",
     FW: "Forward"
   };
+  const WEIGHT_LABELS = ["", "slightly better", "better", "clearly better", "much better", "far better"];
+  // The bar snaps to a tie inside this zone: exact 0 is nearly impossible to hit by dragging.
+  const WEIGHT_TIE_ZONE = 0.3;
+  // Larger than the tie zone, or an arrow key could never leave the centre.
+  const WEIGHT_KEY_STEP = 0.5;
   const STORE_PREFIX = "squadsorter:v1:";
   const app = document.getElementById("app");
   const MANIFEST = window.SQUAD_MANIFEST;
@@ -884,6 +889,7 @@
           '<p class="setup-estimate" id="estimate"></p>' +
           '<div class="setup-actions">' +
             '<button class="btn btn-primary" data-act="start">Start sorting</button>' +
+            '<button class="btn btn-primary" data-act="start-weighted">Start sorting (with weights)</button>' +
             (STATS_URL ? '<button type="button" class="btn btn-ghost" data-go="' + team.id + '/stats">Community ranking</button>' : "") +
             resume +
           "</div>" +
@@ -903,11 +909,12 @@
     const pool = () => team.players.filter(p => selected().includes(p.position));
     const estimate = app.querySelector("#estimate");
     const startBtn = app.querySelector('[data-act="start"]');
+    const weightedBtn = app.querySelector('[data-act="start-weighted"]');
     const update = () => {
       const on = selected();
       app.querySelectorAll(".roster-item").forEach(el => el.classList.toggle("is-out", !on.includes(el.dataset.pos)));
       const n = pool().length;
-      startBtn.disabled = n < 2;
+      startBtn.disabled = weightedBtn.disabled = n < 2;
       estimate.textContent = n < 2
         ? "Pick at least two players to rank."
         : n + " players · at most " + MergeSorter.worstChoices(n) + " matchups";
@@ -915,10 +922,12 @@
     app.querySelectorAll('input[name="pos"]').forEach(i => i.addEventListener("change", update));
     update();
 
-    startBtn.addEventListener("click", () => {
+    const begin = weighted => {
       const ids = pool().map(p => team.id + ":" + p.id);
-      swapScreen(() => startSession(team, MergeSorter.create(ids)));
-    });
+      swapScreen(() => startSession(team, MergeSorter.create(ids, weighted)));
+    };
+    startBtn.addEventListener("click", () => begin(false));
+    weightedBtn.addEventListener("click", () => begin(true));
     const resumeBtn = app.querySelector('[data-act="resume"]');
     if (resumeBtn) resumeBtn.addEventListener("click", () => swapScreen(() => startSession(team, saved.state)));
     const lastBtn = app.querySelector('[data-act="last"]');
@@ -933,10 +942,12 @@
     renderMatchup();
   }
 
-  function cardMarkup(side, key) {
+  function cardMarkup(side, key, weighted) {
     const { team, player } = lookup(key);
+    const tag = weighted ? "div" : "button";
+    const attrs = weighted ? 'class="pick-card pick-card-static"' : 'class="pick-card" data-pick="' + side + '"';
     return (
-      '<button class="pick-card" data-pick="' + side + '" data-team="' + team.id + '" style="' + themeVars(team) + '">' +
+      "<" + tag + " " + attrs + ' data-team="' + team.id + '" style="' + themeVars(team) + '">' +
         '<span class="pick-media">' +
           '<span class="avatar avatar-card">' +
             '<span class="avatar-fallback"><span>' + esc(player.number != null ? player.number : "") + "</span></span>" +
@@ -949,9 +960,85 @@
           '<span class="pick-name">' + esc(player.name) + "</span>" +
           '<span class="pick-meta">#' + esc(player.number) + " · " + esc(player.nation || "") + "</span>" +
         "</span>" +
-        '<span class="pick-key">' + (side === "left" ? "←" : "→") + "</span>" +
-      "</button>"
+        (weighted ? "" : '<span class="pick-key">' + (side === "left" ? "←" : "→") + "</span>") +
+      "</" + tag + ">"
     );
+  }
+
+  function weightRamp() {
+    const max = MergeSorter.maxLevel;
+    const top = MergeSorter.levelGap(max);
+    const points = [];
+    for (let level = -max; level <= max; level++) {
+      points.push(((level + max) / (max * 2) * 100) + "," + (100 - MergeSorter.levelGap(Math.abs(level)) / top * 100));
+    }
+    const shape = "0,100 " + points.join(" ") + " 100,100";
+    return (
+      '<svg class="weight-ramp" viewBox="0 0 100 100" preserveAspectRatio="none">' +
+        '<polygon class="weight-ramp-base" points="' + shape + '"></polygon>' +
+        '<polygon class="weight-ramp-on" points="' + shape + '"></polygon>' +
+      "</svg>"
+    );
+  }
+
+  function weightScaleMarkup() {
+    return (
+      '<div class="weight-scale" aria-hidden="true">' +
+        weightRamp() +
+        '<p class="weight-caption">Difference</p>' +
+      "</div>"
+    );
+  }
+
+  function weightBarMarkup() {
+    const max = MergeSorter.maxLevel;
+    return (
+      '<div class="weight">' +
+        '<p class="weight-label" id="weight-label" aria-live="polite"></p>' +
+        '<input class="weight-bar" type="range" min="' + -max + '" max="' + max + '" step="0.01" value="0" aria-labelledby="weight-label">' +
+        weightScaleMarkup() +
+      "</div>"
+    );
+  }
+
+  function weightValue(bar) {
+    const value = Number(bar.value);
+    return Math.abs(value) < WEIGHT_TIE_ZONE ? 0 : value;
+  }
+
+  function wireWeightBar(pair) {
+    const box = app.querySelector(".weight");
+    const bar = app.querySelector(".weight-bar");
+    const label = app.querySelector("#weight-label");
+    const name = key => lookup(key).player.name;
+    const show = () => {
+      const value = weightValue(bar);
+      bar.value = value;
+      const size = Math.abs(value);
+      const [ahead, behind] = value < 0 ? [pair.left, pair.right] : [pair.right, pair.left];
+      const text = value === 0
+        ? "They're equal"
+        : name(ahead) + " is " + WEIGHT_LABELS[Math.max(1, Math.round(size))] + " than " + name(behind);
+      if (label.textContent !== text) label.textContent = text;
+      bar.setAttribute("aria-valuetext", text);
+      const thumb = 50 + value / MergeSorter.maxLevel * 50;
+      box.style.setProperty("--from", Math.min(50, thumb) + "%");
+      box.style.setProperty("--to", Math.max(50, thumb) + "%");
+    };
+    bar.addEventListener("input", show);
+    show();
+    app.querySelector('[data-act="confirm"]').addEventListener("click", confirmWeight);
+  }
+
+  function moveWeight(step) {
+    const bar = app.querySelector(".weight-bar");
+    bar.value = step ? Number(bar.value) + step : 0;
+    bar.dispatchEvent(new Event("input"));
+  }
+
+  function confirmWeight() {
+    const value = weightValue(app.querySelector(".weight-bar"));
+    pick(value < 0 ? "left" : value > 0 ? "right" : "tie", Math.abs(value));
   }
 
   function renderMatchup() {
@@ -964,6 +1051,7 @@
     }
     const pair = MergeSorter.current(state);
     const pct = Math.round(MergeSorter.progress(state) * 100);
+    const weighted = !!state.weights;
     render(
       '<section class="battle">' +
         '<div class="battle-top">' +
@@ -971,19 +1059,24 @@
           '<span class="battle-pct">' + pct + "% sorted</span>" +
         "</div>" +
         '<div class="progress"><span style="width:' + pct + '%"></span></div>' +
-        '<h2 class="battle-q">Who do you prefer?</h2>' +
+        '<h2 class="battle-q">' + (weighted ? "How much better?" : "Who do you prefer?") + "</h2>" +
         '<div class="arena">' +
-          cardMarkup("left", pair.left) +
+          cardMarkup("left", pair.left, weighted) +
           '<span class="vs">VS</span>' +
-          cardMarkup("right", pair.right) +
+          cardMarkup("right", pair.right, weighted) +
         "</div>" +
+        (weighted ? weightBarMarkup() : "") +
         '<div class="battle-actions">' +
           '<button class="btn btn-ghost" data-act="undo"' + (state.history.length ? "" : " disabled") + ">Undo</button>" +
-          '<button class="btn btn-tie" data-pick="tie">Can\'t choose (tie)</button>' +
+          (weighted
+            ? '<button class="btn btn-primary" data-act="confirm">Confirm</button>'
+            : '<button class="btn btn-tie" data-pick="tie">Can\'t choose (tie)</button>') +
           '<button class="btn btn-ghost" data-act="quit">Save &amp; exit</button>' +
         "</div>" +
         '<div class="battle-kit">' + kitSwitch(team, "site-kit", kitOf(team).id, true) + "</div>" +
-        '<p class="hint">Keyboard: ← / → to pick, ↓ for a tie, Backspace to undo</p>' +
+        '<p class="hint">' + (weighted
+          ? "Drag the bar or use ← / →, ↓ to centre it, Enter to confirm, Backspace to undo"
+          : "Keyboard: ← / → to pick, ↓ for a tie, Backspace to undo") + "</p>" +
       "</section>"
     );
     app.querySelectorAll("[data-pick]").forEach(el =>
@@ -991,11 +1084,12 @@
     );
     app.querySelector('[data-act="undo"]').addEventListener("click", doUndo);
     app.querySelector('[data-act="quit"]').addEventListener("click", () => swapScreen(() => renderTeamSetup(team)));
+    if (weighted) wireWeightBar(pair);
   }
 
-  function pick(which) {
+  function pick(which, level) {
     if (!session || session.state.done) return;
-    MergeSorter.choose(session.state, which);
+    MergeSorter.choose(session.state, which, level);
     renderMatchup();
   }
 
@@ -1009,7 +1103,7 @@
     return location.protocol.startsWith("http") && !local ? location.origin + location.pathname : "";
   }
 
-  function shareEntries(ranking) {
+  function shareEntries(ranking, scores) {
     const out = [];
     ranking.forEach(row => row.ids.forEach(key => {
       const hit = lookup(key);
@@ -1021,14 +1115,28 @@
         team: hit.team,
         player: hit.player,
         positionLabel: POSITIONS[hit.player.position],
-        photoSrc: photoPaths(hit.team, hit.player)
+        photoSrc: photoPaths(hit.team, hit.player),
+        score: scores ? scores[key] : null
       });
     }));
     return out;
   }
 
+  function csvCell(value) {
+    const text = String(value == null ? "" : value);
+    return /[",\r\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
+  }
+
+  function scoresCsv(entries) {
+    const rows = entries.map(e => [e.rank, e.player.name, e.positionLabel, e.player.number, e.score.toFixed(2)]);
+    return [["rank", "player", "position", "number", "score"]].concat(rows)
+      .map(row => row.map(csvCell).join(","))
+      .join("\r\n") + "\r\n";
+  }
+
   function caption(team, entries) {
-    const top = entries.slice(0, 3).map(e => e.rank + (e.tied ? "=" : "") + ". " + e.player.name).join("\n");
+    const points = e => (e.score == null ? "" : " (" + Math.round(e.score) + " pts)");
+    const top = entries.slice(0, 3).map(e => e.rank + (e.tied ? "=" : "") + ". " + e.player.name + points(e)).join("\n");
     return "My " + team.shortName + " ranking (" + team.season + ")\n" + top;
   }
 
@@ -1059,29 +1167,47 @@
 
   function rankingLink(team, state) {
     const prefix = team.id + ":";
-    const groups = (state.queue[0] || []).map(g => g.map(key => key.slice(prefix.length)).join("~"));
-    return location.origin + location.pathname + "?club=" + encodeURIComponent(team.id) + "&r=" + groups.join(".");
+    const list = state.queue[0] || [];
+    const groups = list.map(g => g.map(key => key.slice(prefix.length)).join("~"));
+    const scores = MergeSorter.scores(state);
+    return location.origin + location.pathname + "?club=" + encodeURIComponent(team.id) + "&r=" + groups.join(".") +
+      (scores ? "&s=" + list.map(g => scores[g[0]]).join("~") : "");
+  }
+
+  // One score per ranking group, highest first. Anything else in the link is ignored.
+  function readScores(raw, groups) {
+    if (!raw) return null;
+    const values = raw.split("~").map(Number);
+    const valid = values.length === groups.length &&
+      values.every((v, i) => v >= 0 && v <= 1000 && (!i || v <= values[i - 1]));
+    if (!valid) return null;
+    const out = {};
+    groups.forEach((g, i) => g.forEach(key => { out[key] = values[i]; }));
+    return out;
   }
 
   function importRanking() {
     const params = new URLSearchParams(location.search);
     const club = params.get("club");
     const raw = params.get("r");
+    const rawScores = params.get("s");
     if (!club || !raw) return Promise.resolve();
     params.delete("club");
     params.delete("r");
+    params.delete("s");
     return ensureTeam(club).then(team => {
       if (!team) return;
       const known = new Set(team.players.map(p => p.id));
       const groups = raw.split(".").map(g => g.split("~").filter(id => known.has(id)).map(id => team.id + ":" + id)).filter(g => g.length);
       const count = groups.reduce((n, g) => n + g.length, 0);
       if (count < 2) return;
-      storeSet(team.id, {
-        state: {
-          queue: [groups], left: null, right: null, merged: null, i: 0, j: 0,
-          placed: count, total: count, choices: 0, done: true, history: []
-        }
-      });
+      const state = {
+        queue: [groups], left: null, right: null, merged: null, i: 0, j: 0,
+        placed: count, total: count, choices: 0, done: true, history: []
+      };
+      const savedScores = readScores(rawScores, groups);
+      if (savedScores) state.savedScores = savedScores;
+      storeSet(team.id, { state });
       const rest = params.toString();
       try {
         history.replaceState(null, "", location.pathname + (rest ? "?" + rest : "") + "#/" + team.id + "/results");
@@ -1089,12 +1215,13 @@
     });
   }
 
-  function openShare(team, entries) {
+  function openShare(team, entries, curve) {
     const n = entries.length;
     const modes = [{ value: "top3", label: "Top 3" }];
     if (n > 3) modes.push({ value: "top10", label: "Top 10" });
     if (n > 10) modes.push({ value: "full", label: "Full squad" });
     const opts = { format: "story", mode: n > 10 ? "full" : modes[modes.length - 1].value, kit: kitOf(team).id };
+    if (curve) modes.push({ value: "curve", label: "Score curve" });
     const kitFor = t => (t.id === team.id ? kitOf(t, opts.kit) : kitOf(t));
     const escapeHref = ShareImage.needsBrowserEscape() && session && session.state.done ? rankingLink(team, session.state) : null;
     const url = siteUrl();
@@ -1127,6 +1254,7 @@
               '<button type="button" class="btn btn-primary" data-act="download">Download image</button>' +
               '<button type="button" class="btn btn-social btn-ig" data-act="ig">Instagram story</button>' +
               '<button type="button" class="btn btn-social btn-x" data-act="x">Post on X</button>' +
+              (curve ? '<button type="button" class="btn btn-ghost" data-act="csv">' + (ShareImage.inAppBrowser() ? "Copy CSV" : "Download CSV") + "</button>" : "") +
             "</div>" +
             '<p class="share-note" id="shareNote"></p>' +
           "</div>" +
@@ -1146,18 +1274,22 @@
 
     const fileName = format => team.id + "-ranking-" + opts.mode + "-" + opts.kit + "-" + format + ".png";
 
+    const renderImage = format => ShareImage.render({
+      format,
+      mode: opts.mode,
+      team,
+      entries,
+      curve,
+      subtitleExtra: curve ? " · Scores out of 1000" : "",
+      siteUrl: url,
+      crestSrc: crestPaths(team, kitFor(team)),
+      kitFor
+    });
+
     async function draw() {
       const id = ++renderId;
       preview.classList.add("busy");
-      const c = await ShareImage.render({
-        format: opts.format,
-        mode: opts.mode,
-        team,
-        entries,
-        siteUrl: url,
-        crestSrc: crestPaths(team, kitFor(team)),
-        kitFor
-      });
+      const c = await renderImage(opts.format);
       if (id !== renderId) return;
       canvas = c;
       preview.innerHTML = "";
@@ -1169,7 +1301,22 @@
 
     async function storyCanvas() {
       if (opts.format === "story" && canvas) return canvas;
-      return ShareImage.render({ format: "story", mode: opts.mode, team, entries, siteUrl: url, crestSrc: crestPaths(team, kitFor(team)), kitFor });
+      return renderImage("story");
+    }
+
+    // In-app browsers block file downloads, so there the button copies the text instead.
+    async function exportCsv() {
+      const text = scoresCsv(entries);
+      if (!ShareImage.inAppBrowser()) {
+        ShareImage.download(new File(["\uFEFF" + text], team.id + "-ranking-scores.csv", { type: "text/csv;charset=utf-8" }));
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(text);
+        toast("CSV copied. Paste it into a spreadsheet.");
+      } catch (e) {
+        toast("This app blocks copying. Open the page in your browser to get the CSV.");
+      }
     }
 
     function close() {
@@ -1210,6 +1357,7 @@
     modal.addEventListener("click", async e => {
       if (e.target === modal) return close();
       const act = e.target.closest("[data-act]");
+      if (act && act.dataset.act === "csv") return exportCsv();
       if (!act || !canvas) {
         if (act && act.dataset.act === "close") close();
         return;
@@ -1990,6 +2138,15 @@
     const kit = kitOf(team);
     applyTheme(team);
     const ranking = MergeSorter.ranking(state);
+    const scores = MergeSorter.scores(state);
+    const entries = shareEntries(ranking, scores);
+    const curve = scores && ScoreChart.points(entries.map(entry => ({
+      key: entry.key,
+      name: entry.player.name,
+      rank: entry.rank,
+      tied: entry.tied,
+      score: scores[entry.key]
+    })));
     const rows = [];
     ranking.forEach(row => row.ids.forEach(key => {
       const hit = lookup(key);
@@ -2003,6 +2160,7 @@
             '<span class="rank-name">' + esc(hit.player.name) + "</span>" +
             '<span class="rank-meta">' + POSITIONS[hit.player.position] + " · #" + esc(hit.player.number) + "</span>" +
           "</span>" +
+          (scores ? '<span class="rank-score">' + Math.round(scores[key]) + "<small>pts</small></span>" : "") +
         "</li>"
       );
     }));
@@ -2025,11 +2183,13 @@
           '<button class="btn btn-ghost" data-act="again">Sort again</button>' +
           '<button type="button" class="btn btn-ghost" data-go="' + sectionOf(team) + '">All squads</button>' +
         "</div>" +
+        (curve ? ScoreChart.markup(curve) : "") +
         '<ol class="rank-list">' + rows.join("") + "</ol>" +
       "</section>"
     );
 
-    app.querySelector('[data-act="share"]').addEventListener("click", () => openShare(team, shareEntries(ranking)));
+    if (curve) ScoreChart.mount(app.querySelector(".score-chart"), curve);
+    app.querySelector('[data-act="share"]').addEventListener("click", () => openShare(team, entries, curve));
     const entry = app.querySelector(".stats-entry .stats-entry-sub");
     submitRanking(team).then(() => {
       if (!entry || !app.contains(entry)) return;
@@ -2101,6 +2261,14 @@
 
   document.addEventListener("keydown", e => {
     if (!session || session.state.done || !app.querySelector(".battle")) return;
+    if (session.state.weights) {
+      if (e.key === "ArrowLeft") { e.preventDefault(); moveWeight(-WEIGHT_KEY_STEP); }
+      else if (e.key === "ArrowRight") { e.preventDefault(); moveWeight(WEIGHT_KEY_STEP); }
+      else if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); moveWeight(0); }
+      else if (e.key === "Enter" && !e.repeat && !e.target.closest("button")) { e.preventDefault(); confirmWeight(); }
+      else if (e.key === "Backspace") { e.preventDefault(); doUndo(); }
+      return;
+    }
     if (e.key === "ArrowLeft") { e.preventDefault(); pick("left"); }
     else if (e.key === "ArrowRight") { e.preventDefault(); pick("right"); }
     else if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); pick("tie"); }

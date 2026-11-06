@@ -10,6 +10,10 @@
   const MIN_ROW = 66;
   const MAX_ROW = 104;
   const PAD = 64;
+  const CHART_SCALE = 2.2;
+  const CHART_PAD = 28;
+  const DROP_ROW = 76;
+  const DROP_HEAD = 84;
   const DISPLAY = '"Barlow Condensed", "Arial Narrow", sans-serif';
   const BODY = '"Barlow", system-ui, sans-serif';
   const cache = new Map();
@@ -308,10 +312,18 @@
     return mid + (mt.actualBoundingBoxAscent - mt.actualBoundingBoxDescent) / 2;
   }
 
+  function scoreSize(h) {
+    return Math.min(h * 0.36, 64);
+  }
+
+  function scoreWidth(entry, h) {
+    return entry.score == null ? 0 : scoreSize(h) * 2.4;
+  }
+
   function nameFit(ctx, w, h, entry, showPos, m) {
     const twoLine = m.twoLine && h >= 56;
-    const posW = showPos && !twoLine ? h * 2.3 : 0;
-    const maxName = w - m.nameOff - posW - m.pad;
+    const posW = showPos && !twoLine && entry.score == null ? h * 2.3 : 0;
+    const maxName = w - m.nameOff - posW - scoreWidth(entry, h) - m.pad;
     const desired = Math.min(h * (twoLine ? 0.3 : 0.4), 84);
     const fitted = fitSize(ctx, entry.player.name.toUpperCase(), maxName, 800, desired, 18, DISPLAY);
     return { desired, fitted };
@@ -349,9 +361,10 @@
 
     const nameX = x + m.nameOff;
     const twoLine = m.twoLine && h >= 56;
-    const posInline = showPos && !twoLine;
+    const scored = entry.score != null;
+    const posInline = showPos && !twoLine && !scored;
     const posW = posInline ? h * 2.3 : 0;
-    const maxName = x + w - nameX - posW - pad;
+    const maxName = x + w - nameX - posW - scoreWidth(entry, h) - pad;
     const name = entry.player.name.toUpperCase();
     const size = nameSize || fitSize(ctx, name, maxName, 800, Math.min(h * (twoLine ? 0.3 : 0.4), 84), 18, DISPLAY);
     ctx.fillStyle = theme.ink;
@@ -364,7 +377,8 @@
       const meta = entry.positionLabel + " · #" + entry.player.number;
       const nameAsc = ctx.measureText(nameText).actualBoundingBoxAscent;
       ctx.font = font(500, metaSize, BODY);
-      const mm = ctx.measureText(meta);
+      const metaText = scored ? ellipsize(ctx, meta, maxName) : meta;
+      const mm = ctx.measureText(metaText);
       const gap = metaSize * 0.5;
       const block = nameAsc + gap + mm.actualBoundingBoxAscent + mm.actualBoundingBoxDescent;
       const nameBase = mid - block / 2 + nameAsc;
@@ -373,7 +387,7 @@
       ctx.fillText(nameText, nameX, nameBase);
       ctx.fillStyle = theme.muted;
       ctx.font = font(500, metaSize, BODY);
-      ctx.fillText(meta, nameX, nameBase + gap + mm.actualBoundingBoxAscent);
+      ctx.fillText(metaText, nameX, nameBase + gap + mm.actualBoundingBoxAscent);
     } else {
       ctx.fillText(nameText, nameX, centredBaseline(ctx, nameText, mid));
       if (posInline) {
@@ -383,6 +397,15 @@
         ctx.font = font(600, h * 0.28, DISPLAY);
         ctx.fillText(pos, x + w - pad, centredBaseline(ctx, pos, mid));
       }
+    }
+
+    if (scored) {
+      const score = String(Math.round(entry.score));
+      ctx.fillStyle = theme.primary;
+      ctx.textAlign = "right";
+      ctx.font = font(800, scoreSize(h), DISPLAY);
+      ctx.fillText(score, x + w - pad, centredBaseline(ctx, score, mid));
+      ctx.textAlign = "left";
     }
   }
 
@@ -475,6 +498,116 @@
   }
 
 
+  function drawChartText(ctx, label, colour, outline) {
+    ctx.textAlign = label.anchor === "middle" ? "center" : label.anchor === "end" ? "right" : "left";
+    if (outline) {
+      ctx.strokeStyle = outline;
+      ctx.lineWidth = 4;
+      ctx.lineJoin = "round";
+      ctx.strokeText(label.text, label.x, label.y);
+    }
+    ctx.fillStyle = colour;
+    ctx.fillText(label.text, label.x, label.y);
+  }
+
+  function drawChart(ctx, view, x, y, theme) {
+    const { plot } = view;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(CHART_SCALE, CHART_SCALE);
+    ctx.textBaseline = "alphabetic";
+    ctx.lineCap = "round";
+
+    ctx.font = font(500, 12, BODY);
+    ctx.strokeStyle = theme.line;
+    ctx.lineWidth = 1;
+    view.yTicks.forEach(t => {
+      ctx.beginPath();
+      ctx.moveTo(plot.left, t.y);
+      ctx.lineTo(plot.right, t.y);
+      ctx.stroke();
+      drawChartText(ctx, { x: plot.left - 8, y: t.y + 4, anchor: "end", text: t.text }, theme.muted);
+    });
+    view.xTicks.forEach(t => drawChartText(ctx, { x: t.x, y: plot.bottom + 18, anchor: "middle", text: t.text }, theme.muted));
+
+    ctx.fillStyle = theme.primary;
+    ctx.globalAlpha = 0.1;
+    ctx.fill(new Path2D(view.area));
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = theme.primary;
+    ctx.lineWidth = 2;
+    ctx.lineJoin = "round";
+    ctx.stroke(new Path2D(view.line));
+    ctx.lineWidth = 4;
+    view.drops.forEach(d => {
+      ctx.beginPath();
+      ctx.moveTo(d.from.x, d.from.y);
+      ctx.lineTo(d.to.x, d.to.y);
+      ctx.stroke();
+    });
+
+    ctx.lineWidth = 1.5;
+    view.points.forEach(p => {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 3.5, 0, Math.PI * 2);
+      ctx.fillStyle = theme.primary;
+      ctx.strokeStyle = theme.card;
+      ctx.fill();
+      ctx.stroke();
+    });
+
+    ctx.font = font(700, 13, BODY);
+    view.drops.forEach(d => drawChartText(ctx, d.label, theme.ink, theme.card));
+    view.labels.forEach(l => drawChartText(ctx, l, theme.ink, theme.card));
+    ctx.restore();
+  }
+
+  function drawDrops(ctx, curve, drops, x, y, w, theme) {
+    const rankOf = p => "#" + p.rank + (p.tied ? "=" : "");
+    ctx.textBaseline = "alphabetic";
+    ctx.textAlign = "left";
+    ctx.fillStyle = theme.ink;
+    ctx.font = font(800, 36, DISPLAY);
+    ctx.fillText("BIGGEST DROPS", x, y + 44);
+    drops.forEach((point, i) => {
+      const next = curve[point.index + 1];
+      const mid = y + DROP_HEAD + DROP_ROW * i + DROP_ROW / 2;
+      const value = "−" + point.dropLabel + " pts";
+      ctx.font = font(800, 40, DISPLAY);
+      const valueW = ctx.measureText(value).width;
+      ctx.textAlign = "right";
+      ctx.fillStyle = theme.primary;
+      ctx.fillText(value, x + w, centredBaseline(ctx, value, mid));
+      const pair = rankOf(point) + " " + point.name + " → " + rankOf(next) + " " + next.name;
+      const size = fitSize(ctx, pair, w - valueW - 24, 700, 30, 20, BODY);
+      ctx.font = font(700, size, BODY);
+      const text = ellipsize(ctx, pair, w - valueW - 24);
+      ctx.textAlign = "left";
+      ctx.fillStyle = theme.ink;
+      ctx.fillText(text, x, centredBaseline(ctx, text, mid));
+    });
+  }
+
+  function layoutCurve(ctx, f, curve, top, bottom, theme) {
+    const w = f.w - PAD * 2;
+    const drops = f.h > f.w ? ScoreChart.bigDrops(curve) : [];
+    const panelH = drops.length ? DROP_HEAD + DROP_ROW * drops.length + CHART_PAD * 2 : 0;
+    const chartH = bottom - top - (panelH ? panelH + 20 : 0);
+    const view = ScoreChart.layout(curve, (w - CHART_PAD * 2) / CHART_SCALE, (chartH - CHART_PAD * 2) / CHART_SCALE);
+
+    ctx.fillStyle = theme.card;
+    rr(ctx, PAD, top, w, chartH, 20);
+    ctx.fill();
+    drawChart(ctx, view, PAD + CHART_PAD, top + CHART_PAD, theme);
+
+    if (!panelH) return;
+    const panelTop = bottom - panelH;
+    ctx.fillStyle = theme.card;
+    rr(ctx, PAD, panelTop, w, panelH, 20);
+    ctx.fill();
+    drawDrops(ctx, curve, drops, PAD + CHART_PAD, panelTop + CHART_PAD, w - CHART_PAD * 2, theme);
+  }
+
   function drawFooter(ctx, f, siteUrl, creditNote, theme) {
     const y = f.h - f.foot;
     ctx.strokeStyle = theme.line;
@@ -511,8 +644,8 @@
     const useImages = allowImages !== false;
     await loadFonts();
 
-    const limit = LIMITS[mode];
-    const shown = entries.slice(0, Math.min(limit, entries.length));
+    const isCurve = mode === "curve";
+    const shown = isCurve ? [] : entries.slice(0, Math.min(LIMITS[mode], entries.length));
     shown.forEach(e => { e.kit = kitFor(e.team); });
 
     const imgs = new Map();
@@ -529,10 +662,11 @@
     ctx.fillStyle = kit.paper;
     ctx.fillRect(0, 0, f.w, f.h);
 
-    const modeLabel = mode === "top3" ? "Top 3" : mode === "top10" ? "Top 10" : "Full squad";
+    const modeLabel = isCurve ? "Score curve" : mode === "top3" ? "Top 3" : mode === "top10" ? "Top 10" : "Full squad";
     drawHeader(ctx, f, kit, team, crestImg, team.season + " squad · " + modeLabel + (subtitleExtra || ""));
 
-    layoutList(ctx, f, shown, imgs, f.head + 36, f.h - f.foot - 28, kit);
+    if (isCurve) layoutCurve(ctx, f, opts.curve, f.head + 36, f.h - f.foot - 28, kit);
+    else layoutList(ctx, f, shown, imgs, f.head + 36, f.h - f.foot - 28, kit);
 
     const credited = shown.some(e => imgs.get(e.key) && e.player.credit);
     drawFooter(ctx, f, siteUrl, credited ? "Player photos via Wikimedia Commons. Full credits on the site." : "", kit);

@@ -9,7 +9,8 @@ Rank your favorite players from your favorite clubs and national teams.
 index.html
 version.json                    bump together with SITE_VERSION in index.html on every push
 css/style.css
-js/sorter.js                    ranking engine (merge sort with ties and undo)
+js/sorter.js                    ranking engine (merge sort with ties and undo, weighted scores)
+js/chart.js                     score curve on the results page (data, layout and SVG)
 js/app.js                       screens, theming, saving progress
 data/manifest.js                tabs, leagues/tournaments and which squads appear
 data/teams/<tab>/<group>/<id>.js
@@ -77,12 +78,32 @@ Each club file has a `kits` block with `home`, `away` and `third`. Each kit sets
 Text sitting directly on the page background uses `onPaper`, `onPaperMuted` and `paperPrimary` / `paperOnPrimary` (for buttons and highlights). Set `dark: true` (and a light `line` colour) for dark kits. The club's card on the home page always uses its home kit (`paper`, `onPaper`, `onPaperMuted` and `pattern`). The visitor's choice is remembered per club.
 
 
+## Sorting with weights
+
+"Start sorting (with weights)" shows the same matchups as the normal mode, so it needs the same number of them. Instead of picking one player, the visitor drags a continuous bar from -5 to 5, saved with 2 decimals. The text above it changes by ranges, from "slightly better" to "far better", and the shape below grows with the difference. The screen shows no numbers while voting, so points don't influence the answer. A small zone around the centre (`WEIGHT_TIE_ZONE` in `js/app.js`) snaps to 0 and counts as a tie.
+
+The side of the bar decides the ranking through the usual merge sort. The level is saved in `state.weights` and adds a score to the results page:
+
+1. Each level stands for a target Elo gap. `LEVEL_GAPS` in `js/sorter.js` sets 50, 120, 200, 300 and 400 points for levels 1 to 5, and `levelGap` interpolates the levels in between.
+2. `fitExtraGaps` works like a hard-margin ranking SVM. Every winner must end at least 1 point above their loser, and within that limit it finds the scores with the smallest Elo error across all answers. Tied players share a score.
+3. Neighbouring positions always met in a matchup, so different positions never show the same score.
+4. `toScoreScale` centres the scores on 500. If they don't fit between 0 and 1000, it shrinks only the part of each gap above the minimum.
+
+The results page also draws the scores as a curve (`js/chart.js`), with the drops that stand out marked in points. `ScoreChart.layout` returns the chart in pixels without touching the page, so other renderers can reuse it.
+
+Weighted rankings count towards community stats like any other ranking, but the scores themselves aren't sent.
+
+The Share window exports the scores in three ways. Every list image shows each player's points, "Score curve" under Show draws the curve as an image, and "Download CSV" saves rank, player, position, number and score with 2 decimals. In-app browsers block file downloads, so the button there is "Copy CSV" and copies the same text.
+
+
 ## Share images
 
 The results page has a Share button that builds a PNG (story 9:16 or post 4:5; top 3, top 10 or full squad).
 
 - Download image saves the PNG.
 - Instagram story and Post on X open the phone's share sheet with the image attached. On a computer they download the image instead (X also opens a pre-written post).
+
+Weighted rankings also get the score exports described in "Sorting with weights".
 
 
 ## Releasing an update

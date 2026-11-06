@@ -420,11 +420,79 @@ h1 { font-size: clamp(40px, 7vw, 68px); font-style: italic; }
   font-size: 14px;
 }
 
+.pick-card.pick-card-static { cursor: default; }
+.pick-card.pick-card-static:hover { transform: none; box-shadow: 0 8px 22px rgba(0, 0, 0, 0.08); }
+
+.weight { --from: 50%; --to: 50%; --thumb: 22px; max-width: 720px; margin: 20px auto 0; }
+.weight-label { min-height: 2.4em; margin: 0 0 6px; display: flex; align-items: flex-end; justify-content: center; text-align: center; font-weight: 600; font-size: 17px; line-height: 1.2; }
+.weight-bar {
+  display: block;
+  width: 100%;
+  height: 32px;
+  margin: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  background: linear-gradient(to right, var(--line) var(--from), var(--hi) var(--from), var(--hi) var(--to), var(--line) var(--to)) center / 100% 6px no-repeat;
+  cursor: pointer;
+  touch-action: none;
+}
+.weight-bar::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: var(--thumb);
+  height: var(--thumb);
+  border: 3px solid var(--paper);
+  border-radius: 50%;
+  background: var(--hi);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+}
+.weight-bar::-moz-range-thumb {
+  box-sizing: border-box;
+  width: var(--thumb);
+  height: var(--thumb);
+  border: 3px solid var(--paper);
+  border-radius: 50%;
+  background: var(--hi);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+}
+.weight-bar::-moz-range-track { background: transparent; }
+.weight-scale { padding: 0 calc(var(--thumb) / 2); }
+.weight-ramp { display: block; width: 100%; height: 36px; }
+.weight-ramp-base { fill: var(--line); }
+.weight-ramp-on { fill: var(--hi); clip-path: inset(0 calc(100% - var(--to)) 0 var(--from)); }
+.weight-caption { margin: 6px 0 0; text-align: center; color: var(--dim); font-size: 13px; font-weight: 600; }
+
+@media (pointer: coarse) {
+  .weight { --thumb: 30px; }
+  .weight-bar { height: 44px; }
+}
+
 .battle-actions { display: flex; justify-content: center; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
 
 .battle-kit { display: flex; justify-content: center; margin-top: 16px; }
 
 .hint { text-align: center; color: var(--dim); font-size: 13px; margin-top: 14px; }
+
+.score-chart { margin: 0 0 16px; padding: 18px 20px 14px; background: var(--card); color: var(--ink); border-radius: var(--radius); }
+.score-chart-title { margin: 0; font-size: 24px; color: var(--ink); }
+.score-chart-sub { margin: 2px 0 10px; color: var(--dim); font-size: 14px; }
+.score-stage { position: relative; }
+.score-plot { display: block; border-radius: 8px; cursor: crosshair; touch-action: pan-y; -webkit-tap-highlight-color: transparent; }
+.score-plot:focus { outline: none; }
+.score-plot:focus-visible { outline: 2px solid var(--hi); outline-offset: 2px; }
+.score-plot svg { display: block; overflow: visible; }
+.sc-grid { stroke: var(--line); stroke-width: 1; }
+.sc-axis { fill: var(--dim); font-family: var(--body); font-size: 12px; }
+.sc-area { fill: var(--hi); opacity: 0.1; }
+.sc-line { fill: none; stroke: var(--hi); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.sc-drop { stroke: var(--hi); stroke-width: 4; stroke-linecap: round; }
+.sc-dot { fill: var(--hi); stroke: var(--card); stroke-width: 2; }
+.sc-cross { stroke: var(--dim); stroke-width: 1; }
+.sc-focus { fill: var(--hi); stroke: var(--card); stroke-width: 2; }
+.sc-label { fill: var(--ink); font-family: var(--body); font-size: 13px; font-weight: 600; stroke: var(--card); stroke-width: 4px; stroke-linejoin: round; paint-order: stroke; }
+.sc-label-drop { font-weight: 700; }
+.score-tip { position: absolute; display: flex; flex-direction: column; max-width: 220px; padding: 6px 10px; background: var(--ink); color: var(--card); border-radius: 8px; font-size: 13px; line-height: 1.25; pointer-events: none; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2); }
+.score-tip[hidden] { display: none; }
+.score-tip-value { font-family: var(--display); font-weight: 800; font-size: 19px; }
 
 .rank-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 
@@ -445,6 +513,8 @@ h1 { font-size: clamp(40px, 7vw, 68px); font-style: italic; }
 .rank-text { display: flex; flex-direction: column; }
 .rank-name { font-family: var(--display); font-weight: 800; text-transform: uppercase; font-size: calc(20px + 12px * var(--s)); line-height: 1.05; letter-spacing: 0.01em; }
 .rank-meta { color: var(--dim); font-size: calc(13px + 3px * var(--s)); }
+.rank-score { margin-left: auto; flex-shrink: 0; font-family: var(--display); font-weight: 800; font-size: calc(22px + 12px * var(--s)); line-height: 1; color: var(--hi); }
+.rank-score small { margin-left: 3px; font-size: 13px; font-weight: 600; color: var(--dim); }
 
 .rank-slot { width: 72px; flex-shrink: 0; display: flex; justify-content: center; }
 .avatar-rank { width: calc(44px + 28px * var(--s)); height: calc(44px + 28px * var(--s)); }
@@ -459,6 +529,15 @@ h1 { font-size: clamp(40px, 7vw, 68px); font-style: italic; }
   .setup-head { gap: 12px; }
   .crest-lg { width: 64px; height: 64px; }
   .hint { display: none; }
+  .score-chart { padding: 14px 12px 10px; }
+  .rank-row:has(.rank-score) { gap: 8px; padding-left: 8px; padding-right: 12px; }
+  .rank-row:has(.rank-score) .rank-num { width: 40px; font-size: calc(22px + 12px * var(--s)); }
+  .rank-row:has(.rank-score) .rank-slot { width: auto; }
+  .rank-row:has(.rank-score) .avatar-rank { width: calc(40px + 8px * var(--s)); height: calc(40px + 8px * var(--s)); }
+  .rank-row:has(.rank-score) .rank-text { flex: 1; min-width: 0; }
+  .rank-row:has(.rank-score) .rank-name { font-size: calc(18px + 4px * var(--s)); }
+  .rank-score { font-size: calc(19px + 5px * var(--s)); }
+  .rank-score small { display: none; }
 }
 
 body.modal-open { overflow: hidden; }
@@ -675,7 +754,7 @@ body.modal-open { overflow: hidden; }
   .kit-picker { margin-left: 0; width: 100%; align-items: flex-start; }
 }
 
-.team-tile, .setup-body, .roster-item, .pick-card, .rank-row, .modal-card, .seg {
+.team-tile, .setup-body, .roster-item, .pick-card, .rank-row, .modal-card, .seg, .score-chart {
   --ink: var(--card-ink);
   --dim: var(--card-muted);
   --hi: var(--club-primary);
