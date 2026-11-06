@@ -10,7 +10,7 @@ index.html
 version.json                    bump together with SITE_VERSION in index.html on every push
 css/style.css
 js/sorter.js                    ranking engine (merge sort with ties and undo, weighted scores)
-js/chart.js                     score curve on the results page (data, layout and SVG)
+js/chart.js                     score curve on the results page (data, layout and SVG) and score ladder layout
 js/app.js                       screens, theming, saving progress
 data/manifest.js                tabs, leagues/tournaments and which squads appear
 data/teams/<tab>/<group>/<id>.js
@@ -91,9 +91,11 @@ The side of the bar decides the ranking through the usual merge sort. The level 
 
 The results page also draws the scores as a curve (`js/chart.js`), with the drops that stand out marked in points. `ScoreChart.layout` returns the chart in pixels without touching the page, so other renderers can reuse it.
 
+`ScoreChart.ladder` places the score ladder the same way. The vertical scale runs from the highest score to the lowest, and the centre of each circle sits exactly on its score. A circle that would overlap another moves sideways only, and the radius is the largest that fits the width.
+
 Weighted rankings count towards community stats like any other ranking, but the scores themselves aren't sent.
 
-The Share window exports the scores in three ways. Every list image shows each player's points, "Score curve" under Show draws the curve as an image, and "Download CSV" saves rank, player, position, number and score with 2 decimals. In-app browsers block file downloads, so the button there is "Copy CSV" and copies the same text.
+The Share window exports the scores in four ways. Every list image shows each player's points, "Score curve" under Show draws the curve as an image, "Score ladder" draws one circle per player with their number and name, and "Download CSV" saves rank, player, position, number and score with 2 decimals. In-app browsers block file downloads, so the button there is "Copy CSV" and copies the same text.
 
 
 ## Share images

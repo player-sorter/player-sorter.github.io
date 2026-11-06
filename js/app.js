@@ -1221,7 +1221,7 @@
     if (n > 3) modes.push({ value: "top10", label: "Top 10" });
     if (n > 10) modes.push({ value: "full", label: "Full squad" });
     const opts = { format: "story", mode: n > 10 ? "full" : modes[modes.length - 1].value, kit: kitOf(team).id };
-    if (curve) modes.push({ value: "curve", label: "Score curve" });
+    if (curve) modes.push({ value: "curve", label: "Score curve" }, { value: "ladder", label: "Score ladder" });
     const kitFor = t => (t.id === team.id ? kitOf(t, opts.kit) : kitOf(t));
     const escapeHref = ShareImage.needsBrowserEscape() && session && session.state.done ? rankingLink(team, session.state) : null;
     const url = siteUrl();
@@ -2143,6 +2143,7 @@
     const curve = scores && ScoreChart.points(entries.map(entry => ({
       key: entry.key,
       name: entry.player.name,
+      number: entry.player.number,
       rank: entry.rank,
       tied: entry.tied,
       score: scores[entry.key]

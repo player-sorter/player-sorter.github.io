@@ -14,6 +14,10 @@
   const CHART_PAD = 28;
   const DROP_ROW = 76;
   const DROP_HEAD = 84;
+  const LADDER_AXIS = 62;
+  const LADDER_INSET = 14;
+  const LADDER_MARK = 12;
+  const LADDER_MIN_NAME = 11;
   const DISPLAY = '"Barlow Condensed", "Arial Narrow", sans-serif';
   const BODY = '"Barlow", system-ui, sans-serif';
   const cache = new Map();
@@ -608,6 +612,71 @@
     drawDrops(ctx, curve, drops, PAD + CHART_PAD, panelTop + CHART_PAD, w - CHART_PAD * 2, theme);
   }
 
+  function ladderName(ctx, name, maxW, size) {
+    const full = name.toUpperCase();
+    ctx.font = font(800, size, DISPLAY);
+    if (ctx.measureText(full).width <= maxW) return { text: full, size };
+    const short = full.split(" ").slice(1).join(" ") || full;
+    const fitted = fitSize(ctx, short, maxW, 800, size, Math.max(LADDER_MIN_NAME, size * 0.75), DISPLAY);
+    return { text: ellipsize(ctx, short, maxW), size: fitted };
+  }
+
+  function drawLadderCircle(ctx, circle, r, theme) {
+    ctx.beginPath();
+    ctx.arc(circle.x, circle.y, r, 0, Math.PI * 2);
+    ctx.fillStyle = theme.primary;
+    ctx.fill();
+    ctx.fillStyle = theme.onPrimary;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "alphabetic";
+    const number = circle.number != null ? String(circle.number) : "";
+    const nameSize = r * 0.34;
+    if (nameSize < LADDER_MIN_NAME) {
+      ctx.font = font(800, r, DISPLAY, true);
+      ctx.fillText(number, circle.x, centredBaseline(ctx, number, circle.y));
+      return;
+    }
+    ctx.font = font(800, r * 0.82, DISPLAY, true);
+    ctx.fillText(number, circle.x, centredBaseline(ctx, number, circle.y - r * 0.2));
+    const name = ladderName(ctx, circle.name, r * 1.62, nameSize);
+    ctx.font = font(800, name.size, DISPLAY);
+    ctx.fillText(name.text, circle.x, centredBaseline(ctx, name.text, circle.y + r * 0.47));
+  }
+
+  function layoutLadder(ctx, f, curve, top, bottom, theme) {
+    const left = PAD + CHART_PAD + LADDER_AXIS;
+    const right = f.w - PAD - LADDER_INSET;
+    const view = ScoreChart.ladder(curve, { left, right, top: top + CHART_PAD, bottom: bottom - CHART_PAD });
+
+    ctx.fillStyle = theme.card;
+    rr(ctx, PAD, top, f.w - PAD * 2, bottom - top, 20);
+    ctx.fill();
+
+    ctx.font = font(500, 26, BODY);
+    ctx.textAlign = "right";
+    ctx.textBaseline = "alphabetic";
+    ctx.strokeStyle = theme.line;
+    ctx.lineWidth = 2;
+    view.ticks.forEach(t => {
+      ctx.beginPath();
+      ctx.moveTo(left, t.y);
+      ctx.lineTo(right, t.y);
+      ctx.stroke();
+      ctx.fillStyle = theme.muted;
+      ctx.fillText(t.text, left - 14, centredBaseline(ctx, t.text, t.y));
+    });
+
+    ctx.strokeStyle = theme.primary;
+    ctx.lineWidth = 3;
+    view.circles.forEach(c => {
+      ctx.beginPath();
+      ctx.moveTo(left, c.y);
+      ctx.lineTo(left + LADDER_MARK, c.y);
+      ctx.stroke();
+    });
+    view.circles.forEach(c => drawLadderCircle(ctx, c, view.radius, theme));
+  }
+
   function drawFooter(ctx, f, siteUrl, creditNote, theme) {
     const y = f.h - f.foot;
     ctx.strokeStyle = theme.line;
@@ -645,7 +714,8 @@
     await loadFonts();
 
     const isCurve = mode === "curve";
-    const shown = isCurve ? [] : entries.slice(0, Math.min(LIMITS[mode], entries.length));
+    const isLadder = mode === "ladder";
+    const shown = isCurve || isLadder ? [] : entries.slice(0, Math.min(LIMITS[mode], entries.length));
     shown.forEach(e => { e.kit = kitFor(e.team); });
 
     const imgs = new Map();
@@ -662,10 +732,11 @@
     ctx.fillStyle = kit.paper;
     ctx.fillRect(0, 0, f.w, f.h);
 
-    const modeLabel = isCurve ? "Score curve" : mode === "top3" ? "Top 3" : mode === "top10" ? "Top 10" : "Full squad";
+    const modeLabel = isCurve ? "Score curve" : isLadder ? "Score ladder" : mode === "top3" ? "Top 3" : mode === "top10" ? "Top 10" : "Full squad";
     drawHeader(ctx, f, kit, team, crestImg, team.season + " squad · " + modeLabel + (subtitleExtra || ""));
 
     if (isCurve) layoutCurve(ctx, f, opts.curve, f.head + 36, f.h - f.foot - 28, kit);
+    else if (isLadder) layoutLadder(ctx, f, opts.curve, f.head + 36, f.h - f.foot - 28, kit);
     else layoutList(ctx, f, shown, imgs, f.head + 36, f.h - f.foot - 28, kit);
 
     const credited = shown.some(e => imgs.get(e.key) && e.player.credit);

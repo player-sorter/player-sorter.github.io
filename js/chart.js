@@ -11,6 +11,11 @@
   const DROP_MIN_POINTS = 20;
   const DROP_MIN_RATIO = 2;
   const CHAR_WIDTH = 6.8;
+  const LADDER_MAX_RADIUS = 104;
+  const LADDER_MIN_RADIUS = 10;
+  const LADDER_GAP = 0.07;
+  const LADDER_TICK_SPACING = 120;
+  const LADDER_TICK_STEPS = [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500];
 
   function esc(text) {
     return String(text).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -152,6 +157,61 @@
     };
   }
 
+  // Moves circles sideways only, so y keeps meaning the score. Slots sit half a circle
+  // apart: tied players fill every other slot and close scores nest in between.
+  function stack(ys, size) {
+    const placed = [];
+    const isFree = (x, y) => placed.every(p => (p.x - x) ** 2 + (p.y - y) ** 2 >= size * size - 0.01);
+    let lean = 0;
+    ys.forEach(y => {
+      const side = lean > 0 ? -1 : 1;
+      let x = 0;
+      for (let k = 1; !isFree(x, y); k++) x = (k % 2 ? side : -side) * Math.ceil(k / 2) * size / 2;
+      lean += Math.sign(x);
+      placed.push({ x, y });
+    });
+    return placed;
+  }
+
+  function ladderTicks(high, low, box, yOf) {
+    if (high === low) return [{ y: yOf(high), text: String(Math.round(high)) }];
+    const perPoint = (yOf(low) - yOf(high)) / (high - low);
+    const step = LADDER_TICK_STEPS.find(s => s * perPoint >= LADDER_TICK_SPACING) || SCORE_MAX;
+    const ceiling = Math.min(SCORE_MAX, high + (yOf(high) - box.top) / perPoint);
+    const floor = Math.max(0, low - (box.bottom - yOf(low)) / perPoint);
+    const ticks = [];
+    for (let value = Math.ceil(floor / step) * step; value <= ceiling; value += step) {
+      ticks.push({ y: yOf(value), text: String(value) });
+    }
+    return ticks;
+  }
+
+  // Circles from the highest score to the lowest, as big as the box allows. The centre
+  // of each circle sits exactly on its score. Like layout, it has no DOM or colours.
+  function ladder(list, box) {
+    const high = list[0].score;
+    const low = list[list.length - 1].score;
+    const room = box.right - box.left;
+    let view = null;
+    for (let radius = LADDER_MAX_RADIUS; radius >= LADDER_MIN_RADIUS; radius--) {
+      const top = box.top + radius;
+      const bottom = box.bottom - radius;
+      const yOf = score => (high === low ? (top + bottom) / 2 : top + (bottom - top) * (high - score) / (high - low));
+      const placed = stack(list.map(p => yOf(p.score)), radius * 2 * (1 + LADDER_GAP));
+      const xs = placed.map(p => p.x);
+      const leftmost = Math.min(...xs);
+      const rightmost = Math.max(...xs);
+      const shift = (box.left + box.right - leftmost - rightmost) / 2;
+      view = {
+        radius,
+        circles: list.map((p, i) => ({ ...p, x: placed[i].x + shift, y: placed[i].y })),
+        ticks: ladderTicks(high, low, box, yOf)
+      };
+      if (rightmost - leftmost + radius * 2 <= room) break;
+    }
+    return view;
+  }
+
   function svg(view) {
     const { plot } = view;
     const dots = view.showAllDots ? view.points : [view.points[0], view.points[view.points.length - 1]];
@@ -270,5 +330,5 @@
     if (window.ResizeObserver) new ResizeObserver(draw).observe(stage);
   }
 
-  window.ScoreChart = { points, bigDrops, layout, svg, summary, markup, mount };
+  window.ScoreChart = { points, bigDrops, layout, ladder, svg, summary, markup, mount };
 })();
