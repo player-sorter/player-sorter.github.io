@@ -1,4 +1,5 @@
 # GitHub Pages builds this site with Jekyll. Keep developer-only pages and scripts out of the
-# published site (they still live in the repository for collaborators).
+# published site. The banner preview page is deliberately NOT in tools/: it sits in a randomly
+# named folder so collaborators can open it by link.
 exclude:
   - tools
