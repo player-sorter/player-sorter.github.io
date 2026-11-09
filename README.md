@@ -133,6 +133,18 @@ The results page has a Share button that builds a PNG (story 9:16 or post 4:5; t
 - Instagram story and Post on X open the phone's share sheet with the image attached. On a computer they download the image instead (X also opens a pre-written post).
 
 
+## Checking banners (developer tool)
+
+`tools/banners.html` draws the share-image header ("banner") of every squad in every kit with the same code the site uses, so you can check a new kit without sorting a whole squad. Serve the repo root and open it:
+
+```
+python -m http.server 8000
+# then open http://localhost:8000/tools/banners.html
+```
+
+Pick a section and a banner shape at the top; banners render as you scroll. `?format=post` and `?only=new` preselect options. The page is excluded from the published site by `_config.yml` (GitHub Pages builds with Jekyll); it only lives in the repository.
+
+
 ## Releasing an update
 
 Browsers (especially in-app ones like X's) keep old copies of the site. Every time you push, bump the number in both `window.SITE_VERSION` (top of `index.html`) and `version.json`, keeping them identical. A new number makes every script, stylesheet and team file load fresh, and visitors with an old cached page are reloaded once onto the new version.

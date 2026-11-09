@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Banner check (dev tool)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@0,600;0,800;1,800&family=Barlow:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #14161c; color: #e8eaf0; font: 14px/1.4 system-ui, sans-serif; }
+  header { position: sticky; top: 0; z-index: 2; background: #14161cee; backdrop-filter: blur(6px); padding: 12px 24px; border-bottom: 1px solid #2a2e38; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+  h1 { font-size: 16px; margin: 0; }
+  .seg { display: flex; gap: 6px; flex-wrap: wrap; }
+  .seg button, select { background: #232733; color: inherit; border: 1px solid #343a48; border-radius: 999px; padding: 6px 14px; cursor: pointer; font: inherit; }
+  .seg button.on { background: #e8eaf0; color: #14161c; border-color: #e8eaf0; }
+  select { border-radius: 8px; }
+  label { display: flex; gap: 6px; align-items: center; color: #9aa1b2; }
+  main { padding: 24px; display: grid; gap: 28px; max-width: 1500px; margin: 0 auto; }
+  .group h2 { font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: #9aa1b2; margin: 8px 0 14px; }
+  .group section { margin-bottom: 26px; }
+  section h3 { font-size: 15px; margin: 0 0 10px; font-weight: 700; }
+  section h3 small { font-weight: 400; color: #9aa1b2; margin-left: 8px; }
+  .row { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-start; min-height: 40px; }
+  figure { margin: 0; }
+  figcaption { font-size: 12px; color: #9aa1b2; margin-top: 6px; }
+  canvas { display: block; border-radius: 6px; box-shadow: 0 2px 12px rgba(0,0,0,.4); max-width: 100%; height: auto; }
+  .note { color: #9aa1b2; font-size: 12px; max-width: 70ch; }
+  #status { color: #9aa1b2; font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Banner check</h1>
+  <div class="seg" id="formats"></div>
+  <label>Section <select id="section"></select></label>
+  <label><input type="checkbox" id="onlyNew"> Only redesigned squads</label>
+  <span id="status">loading…</span>
+</header>
+<main>
+  <p class="note">Developer page: shows the share-image header ("banner") of every squad in every kit, drawn by the same code the site uses (<code>js/kits.js</code> and <code>js/share.js</code>). Serve the repo root (<code>python -m http.server</code>) and open <code>/tools/banners.html</code>. Banners render as you scroll. <code>?format=post</code> or <code>?only=new</code> preselect options.</p>
+  <div id="out"></div>
+</main>
+
+<script src="../data/manifest.js"></script>
+<script src="../js/kits.js"></script>
+<script src="../js/share.js"></script>
+<script>
+(function () {
+  const BASE = "../";
+  const REDESIGNED = [
+    "new-england-revolution", "west-ham-united", "leverkusen", "frankfurt", "dortmund", "cagliari",
+    "manchester-city", "liverpool", "arsenal", "fiorentina", "villarreal",
+    "2026-france", "2026-germany", "2026-brasil", "2026-usa"
+  ];
+  const FORMATS = [["wide", "Wide 16:9"], ["story", "Story 9:16"], ["post", "Post 4:5"], ["square", "Square 1:1"]];
+  const HEAD = { wide: 210, story: 340, post: 240, square: 210 };
+  const SIZE = { wide: 1920, story: 1080, post: 1080, square: 1080 };
+
+  const TEAMS = {};
+  window.registerTeam = t => { TEAMS[t.id] = t; };
+
+  const sections = (window.SQUAD_MANIFEST.sections || []).map(s => ({
+    id: s.id, name: s.name,
+    groups: (s.groups || []).filter(g => (g.teams || []).length).map(g => ({
+      id: g.id, name: g.name, teams: g.teams.map(id => ({ id, dir: s.id + "/" + g.id + "/" + id }))
+    }))
+  })).filter(s => s.groups.length);
+
+  const q = new URLSearchParams(location.search);
+  let format = FORMATS.some(f => f[0] === q.get("format")) ? q.get("format") : "wide";
+  let sectionId = sections[0] ? sections[0].id : "";
+  const onlyNew = document.getElementById("onlyNew");
+  onlyNew.checked = q.get("only") === "new";
+  const status = document.getElementById("status");
+  const out = document.getElementById("out");
+  let token = 0;
+
+  function loadScript(src) {
+    return new Promise(res => {
+      const s = document.createElement("script");
+      s.src = src + "?t=" + Date.now();
+      s.onload = res;
+      s.onerror = () => { console.warn("missing", src); res(); };
+      document.head.appendChild(s);
+    });
+  }
+
+  function entries(team, dir) {
+    return team.players.slice(0, 3).map((p, i) => ({
+      key: team.id + ":" + p.id, team, player: p, rank: i + 1, tied: false,
+      photoSrc: [BASE + "assets/teams/" + dir + "/players/" + p.id + ".webp"]
+    }));
+  }
+
+  async function paintTeam(entry, row, mine) {
+    if (!TEAMS[entry.id]) await loadScript(BASE + "data/teams/" + entry.dir + ".js");
+    const team = TEAMS[entry.id];
+    if (!team || mine !== token) return;
+    const base = BASE + "assets/teams/" + entry.dir + "/";
+    row.innerHTML = "";
+    for (const kitId of Kits.ids(team)) {
+      if (mine !== token) return;
+      const full = await ShareImage.render({
+        format, mode: "top3", team, entries: entries(team, entry.dir), siteUrl: "player-sorter.github.io",
+        crestSrc: [base + "crest.png", base + "crest.svg", base + "crest.webp"],
+        kitFor: t => Kits.get(t, t.id === entry.id ? kitId : undefined)
+      });
+      const crop = document.createElement("canvas");
+      crop.width = full.width;
+      crop.height = HEAD[format];
+      crop.getContext("2d").drawImage(full, 0, 0);
+      crop.style.width = Math.min(format === "wide" ? 760 : 480, SIZE[format]) + "px";
+      const fig = document.createElement("figure");
+      fig.appendChild(crop);
+      const cap = document.createElement("figcaption");
+      cap.textContent = kitId + " · " + ((Kits.get(team, kitId).headerPattern || Kits.get(team, kitId).pattern || {}).type || "plain");
+      fig.appendChild(cap);
+      row.appendChild(fig);
+    }
+    row.dataset.done = "1";
+  }
+
+  function build() {
+    const mine = ++token;
+    out.innerHTML = "";
+    const section = sections.find(s => s.id === sectionId) || sections[0];
+    if (!section) return;
+    let count = 0;
+    const io = new IntersectionObserver(items => {
+      items.forEach(it => {
+        if (!it.isIntersecting) return;
+        const el = it.target;
+        io.unobserve(el);
+        paintTeam(el._entry, el.querySelector(".row"), mine).then(() => {
+          status.textContent = "rendered " + out.querySelectorAll('.row[data-done]').length + " of " + count + " · " + format;
+        });
+      });
+    }, { rootMargin: "600px 0px" });
+    section.groups.forEach(g => {
+      const teams = g.teams.filter(t => !onlyNew.checked || REDESIGNED.indexOf(t.id) >= 0);
+      if (!teams.length) return;
+      const wrap = document.createElement("div");
+      wrap.className = "group";
+      wrap.innerHTML = "<h2>" + g.name + "</h2>";
+      teams.forEach(t => {
+        count++;
+        const sec = document.createElement("section");
+        sec._entry = t;
+        sec.innerHTML = "<h3>" + t.id + "<small>" + g.name + "</small></h3><div class=\"row\"></div>";
+        wrap.appendChild(sec);
+        io.observe(sec);
+      });
+      out.appendChild(wrap);
+    });
+    status.textContent = count + " squads · scroll to render";
+  }
+
+  const seg = document.getElementById("formats");
+  FORMATS.forEach(([v, label]) => {
+    const b = document.createElement("button");
+    b.textContent = label;
+    b.className = v === format ? "on" : "";
+    b.onclick = () => {
+      format = v;
+      [...seg.children].forEach(c => c.classList.toggle("on", c === b));
+      build();
+    };
+    seg.appendChild(b);
+  });
+  const sel = document.getElementById("section");
+  sections.forEach(s => {
+    const o = document.createElement("option");
+    o.value = s.id;
+    o.textContent = s.name || s.id;
+    sel.appendChild(o);
+  });
+  sel.onchange = () => { sectionId = sel.value; build(); };
+  onlyNew.onchange = build;
+  build();
+})();
+</script>
+</body>
+</html>
