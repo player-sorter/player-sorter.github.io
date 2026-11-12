@@ -876,7 +876,7 @@
           "<h1>Pick a squad &amp; start ranking</h1>" +
           siteCredits() +
         "</section>" +
-        '<div class="home-bar' + (searching() ? " is-searching" : "") + '">' + searchBox() + tabs + "</div>" +
+        '<div class="home-bar' + (searching() ? " is-searching" : "") + '">' + searchBox() + tabs + libEntryButton() + "</div>" +
         '<div class="home-body" data-section="' + section.id + '">' + body + "</div>",
         keepScroll
       );
@@ -3504,8 +3504,11 @@
             '<p class="eyebrow">Your ranking</p>' +
             "<h1>" + esc(team.name) + "</h1>" +
           "</div>" +
+          supportLink("support-results", "Buy me a coffee", true) +
+        "</div>" +
+        '<div class="results-row">' +
+          '<div class="lib-save-slot"></div>' +
           '<div class="results-side">' +
-            supportLink("support-results", "Buy me a coffee", true) +
             (custom
               ? '<div class="kit-picker builder-colours"><span class="kit-label">Colors</span>' + colourMenu(customConfig()) + kitSwitch(team, "site-kit", kitOf(team).id, true) + "</div>"
               : kitPicker(team)) +
@@ -3523,6 +3526,7 @@
     );
 
     app.querySelector('[data-act="share"]').addEventListener("click", () => openShare(team, shareEntries(ranking, custom)));
+    libSaveBox(team, state);
     const resultsMenu = custom && app.querySelector(".results .colour-menu");
     if (resultsMenu) wireColourMenu(resultsMenu, customConfig(), () => swapScreen(renderResults));
     const entry = app.querySelector(".stats-entry .stats-entry-sub");
@@ -3559,6 +3563,1090 @@
     }
   }
 
+  const LIB_ID = "my-rankings";
+  const LIB_KEY = "library";
+  const LIB_MAX = 400;
+  const LIB_TITLE_MAX = 60;
+  const LIB_FOLDER_MAX = 40;
+  const BOOKMARK = '<svg class="lib-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 3.5h11v17l-5.5-4-5.5 4z" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/></svg>';
+  const DOTS = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="2" fill="currentColor"/><circle cx="12" cy="12" r="2" fill="currentColor"/><circle cx="19" cy="12" r="2" fill="currentColor"/></svg>';
+  const SEARCH_ICON = '<svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="m15.5 15.5 5 5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>';
+  let libQuery = { page: "", q: "" };
+  let libAsk = null;
+  let libSyncTimer = null;
+  let libSyncing = null;
+  let libSyncAgain = false;
+
+  function validEntry(r) {
+    return !!r && typeof r.id === "string" && typeof r.squad === "string" && Array.isArray(r.groups) &&
+      r.groups.every(g => Array.isArray(g) && g.every(k => typeof k === "string"));
+  }
+
+  function validFolder(f) {
+    return !!f && typeof f.id === "string" && typeof f.name === "string" && Array.isArray(f.ids);
+  }
+
+  function libRead() {
+    const raw = storeGet(LIB_KEY) || {};
+    return {
+      rankings: Array.isArray(raw.rankings) ? raw.rankings.filter(validEntry) : [],
+      folders: Array.isArray(raw.folders) ? raw.folders.filter(validFolder) : [],
+      dead: raw.dead && typeof raw.dead === "object" ? raw.dead : {},
+      code: typeof raw.code === "string" ? raw.code : "",
+      imported: !!raw.imported
+    };
+  }
+
+  function libWrite(lib, quiet) {
+    storeSet(LIB_KEY, lib);
+    updateLibCount(lib);
+    if (!quiet && lib.code) queueLibSync();
+  }
+
+  function libId() {
+    return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  }
+
+  function libFlat(entry) {
+    return entry.groups.reduce((all, g) => all.concat(g), []);
+  }
+
+  function libGroups(entry) {
+    return entry.groups.map(g => g.filter(key => lookup(key))).filter(g => g.length);
+  }
+
+  function libState(entry) {
+    return { queue: [libGroups(entry)], left: null, right: null, merged: null, i: 0, j: 0, placed: 0, total: 0, choices: 0, done: true, history: [] };
+  }
+
+  function libIsCustom(entry) {
+    return entry.squad === CUSTOM_ID;
+  }
+
+  function libTeam(entry) {
+    if (!libIsCustom(entry)) return TEAMS[entry.squad] || null;
+    const cfg = entry.cfg || {};
+    return customTeam({
+      keys: libFlat(entry).filter(key => lookup(key)),
+      name: typeof cfg.name === "string" ? cfg.name : "",
+      colours: typeof cfg.colours === "string" && cfg.colours ? cfg.colours : "neutral"
+    });
+  }
+
+  function libDate(ts) {
+    const d = new Date(ts || Date.now());
+    const opts = { day: "numeric", month: "short" };
+    if (d.getFullYear() !== new Date().getFullYear()) opts.year = "numeric";
+    try {
+      return d.toLocaleDateString("en-GB", opts);
+    } catch (e) {
+      return d.toDateString();
+    }
+  }
+
+  function libSquadName(entry) {
+    if (libIsCustom(entry)) return (entry.cfg && entry.cfg.name && entry.cfg.name.trim()) || CUSTOM_DEFAULT_NAME;
+    const team = TEAMS[entry.squad];
+    return team ? team.name : entry.squad;
+  }
+
+  function libDefaultTitle(entry) {
+    return libSquadName(entry) + " · " + libDate(entry.at);
+  }
+
+  function libTitle(entry) {
+    return (entry.title || "").trim() || libDefaultTitle(entry);
+  }
+
+  function libSub(entry) {
+    if (libIsCustom(entry)) return "Build your own · " + libFlat(entry).length + " players";
+    const team = TEAMS[entry.squad];
+    return libSquadName(entry) + (team && team.season ? " · " + team.season : "");
+  }
+
+  function libTeamIds(entries) {
+    const ids = {};
+    entries.forEach(entry => {
+      if (!libIsCustom(entry)) ids[entry.squad] = true;
+      else {
+        libFlat(entry).forEach(key => { ids[key.split(":")[0]] = true; });
+        if (entry.cfg && entry.cfg.colours) ids[entry.cfg.colours] = true;
+      }
+    });
+    return Object.keys(ids).filter(id => INDEX[id]);
+  }
+
+  function ensureLibTeams(entries) {
+    return Promise.all(libTeamIds(entries).map(ensureTeam));
+  }
+
+  function updateLibCount(lib) {
+    const n = (lib || libRead()).rankings.length;
+    document.querySelectorAll(".lib-entry-count").forEach(el => {
+      el.textContent = n;
+      el.hidden = !n;
+    });
+  }
+
+  function libEntryButton() {
+    const n = libRead().rankings.length;
+    return (
+      '<button type="button" class="lib-entry" data-go="' + LIB_ID + '" aria-label="My rankings">' +
+        BOOKMARK +
+        '<span class="lib-entry-label">My rankings</span>' +
+        '<span class="lib-entry-count"' + (n ? "" : " hidden") + ">" + n + "</span>" +
+      "</button>"
+    );
+  }
+
+  function libImport() {
+    const lib = libRead();
+    if (lib.imported) return Promise.resolve(lib);
+    const found = Object.keys(INDEX).map(id => ({ id, saved: storeGet(id) })).filter(x => x.saved && x.saved.state && x.saved.state.done);
+    const custom = storeGet(CUSTOM_ID);
+    const customKeys = custom && custom.state && custom.state.done ? MergeSorter.allIds(custom.state) : [];
+    const teamIds = found.map(x => x.id).concat(customKeys.map(key => key.split(":")[0])).filter((id, i, all) => INDEX[id] && all.indexOf(id) === i);
+    return Promise.all(teamIds.map(ensureTeam)).then(() => {
+      const now = libRead();
+      if (now.imported) return now;
+      const add = (squad, state, cfg) => {
+        const groups = MergeSorter.ranking(state).map(row => row.ids.slice());
+        if (!groups.length) return;
+        const sig = JSON.stringify(groups);
+        if (now.rankings.some(r => r.squad === squad && JSON.stringify(r.groups) === sig)) return;
+        const stamp = Date.now() - now.rankings.length;
+        const entry = { id: libId(), squad, title: "", at: stamp, updated: stamp, groups };
+        if (cfg) entry.cfg = cfg;
+        now.rankings.push(entry);
+        storeSet("libsig:" + squad, sig);
+      };
+      found.forEach(x => {
+        const team = TEAMS[x.id];
+        if (team && isValidSaved(team, x.saved)) add(x.id, x.saved.state);
+      });
+      if (customKeys.length && customKeys.every(key => lookup(key))) {
+        const cfg = customConfig();
+        add(CUSTOM_ID, custom.state, { name: cfg.name, colours: cfg.colours });
+      }
+      now.rankings.sort((a, b) => b.at - a.at);
+      now.imported = true;
+      libWrite(now);
+      return now;
+    });
+  }
+
+  function libAutoSave(team, state) {
+    const groups = MergeSorter.ranking(state).map(row => row.ids.slice());
+    if (!groups.length) return null;
+    const lib = libRead();
+    const custom = isCustom(team);
+    const squad = custom ? CUSTOM_ID : team.id;
+    const sig = JSON.stringify(groups);
+    const cfg = custom ? { name: customConfig().name, colours: customConfig().colours } : null;
+    const same = lib.rankings.find(r => r.squad === squad && JSON.stringify(r.groups) === sig);
+    if (same) return same;
+    if (storeGet("libsig:" + squad) === sig) return null;
+    return libAdd(squad, groups, cfg, true);
+  }
+
+  function libAdd(squad, groups, cfg, ask) {
+    const lib = libRead();
+    const now = Date.now();
+    const entry = { id: libId(), squad, title: "", at: now, updated: now, groups };
+    if (cfg) entry.cfg = cfg;
+    const prev = squad === CUSTOM_ID ? null : lib.rankings.find(r => r.squad === squad);
+    lib.rankings.unshift(entry);
+    lib.rankings.slice(LIB_MAX).forEach(r => { lib.dead[r.id] = now; });
+    lib.rankings = lib.rankings.slice(0, LIB_MAX);
+    storeSet("libsig:" + squad, JSON.stringify(groups));
+    libWrite(lib);
+    libAsk = ask && prev ? { id: entry.id, prev: prev.id, at: prev.at } : null;
+    return entry;
+  }
+
+  function libUpdate(id, change) {
+    const lib = libRead();
+    const entry = lib.rankings.find(r => r.id === id);
+    if (!entry) return null;
+    change(entry, lib);
+    entry.updated = Date.now();
+    libWrite(lib);
+    return entry;
+  }
+
+  function libDelete(id) {
+    const lib = libRead();
+    const now = Date.now();
+    lib.rankings = lib.rankings.filter(r => r.id !== id);
+    lib.dead[id] = now;
+    lib.folders.forEach(f => {
+      if (f.ids.includes(id)) {
+        f.ids = f.ids.filter(x => x !== id);
+        f.updated = now;
+      }
+    });
+    libWrite(lib);
+  }
+
+  function libReplace(keepId, oldId) {
+    const lib = libRead();
+    const now = Date.now();
+    lib.folders.forEach(f => {
+      if (!f.ids.includes(oldId)) return;
+      f.ids = f.ids.filter(x => x !== oldId);
+      if (!f.ids.includes(keepId)) f.ids.unshift(keepId);
+      f.updated = now;
+    });
+    lib.rankings = lib.rankings.filter(r => r.id !== oldId);
+    lib.dead[oldId] = now;
+    libWrite(lib);
+  }
+
+  function libNewFolder(name, firstId) {
+    const lib = libRead();
+    const now = Date.now();
+    const folder = { id: libId(), name: name.trim().slice(0, LIB_FOLDER_MAX), ids: firstId ? [firstId] : [], at: now, updated: now };
+    lib.folders.push(folder);
+    libWrite(lib);
+    return folder;
+  }
+
+  function libToggleFolder(folderId, rankingId, on) {
+    const lib = libRead();
+    const folder = lib.folders.find(f => f.id === folderId);
+    if (!folder) return;
+    const has = folder.ids.includes(rankingId);
+    if (on === has) return;
+    folder.ids = on ? [rankingId].concat(folder.ids) : folder.ids.filter(x => x !== rankingId);
+    folder.updated = Date.now();
+    libWrite(lib);
+  }
+
+  function libRenameFolder(folderId, name) {
+    const lib = libRead();
+    const folder = lib.folders.find(f => f.id === folderId);
+    if (!folder) return;
+    folder.name = name.trim().slice(0, LIB_FOLDER_MAX);
+    folder.updated = Date.now();
+    libWrite(lib);
+  }
+
+  function libDeleteFolder(folderId) {
+    const lib = libRead();
+    lib.folders = lib.folders.filter(f => f.id !== folderId);
+    lib.dead[folderId] = Date.now();
+    libWrite(lib);
+  }
+
+  function libPayload(lib) {
+    return { rankings: lib.rankings, folders: lib.folders, dead: lib.dead };
+  }
+
+  function libMerge(a, b) {
+    const dead = Object.assign({}, a.dead || {});
+    Object.keys((b && b.dead) || {}).forEach(id => {
+      const t = b.dead[id];
+      if (typeof t === "number" && !(dead[id] >= t)) dead[id] = t;
+    });
+    const pick = (x, y) => {
+      const map = {};
+      (x || []).concat(y || []).forEach(item => {
+        const cur = map[item.id];
+        if (!cur || (item.updated || 0) > (cur.updated || 0)) map[item.id] = item;
+      });
+      return Object.keys(map).map(id => map[id]).filter(item => !(dead[item.id] >= (item.updated || 0)));
+    };
+    const rankings = pick(a.rankings, ((b && b.rankings) || []).filter(validEntry)).sort((p, q) => (q.at || 0) - (p.at || 0)).slice(0, LIB_MAX);
+    const live = {};
+    rankings.forEach(r => { live[r.id] = true; });
+    const folders = pick(a.folders, ((b && b.folders) || []).filter(validFolder))
+      .map(f => Object.assign({}, f, { ids: f.ids.filter(id => live[id]) }))
+      .sort((p, q) => (p.at || 0) - (q.at || 0));
+    return { rankings, folders, dead, code: a.code || "", imported: a.imported };
+  }
+
+  function libPost(body) {
+    return fetch(STATS_URL, { method: "POST", body: JSON.stringify(Object.assign({ type: "library" }, body)) })
+      .then(r => r.json())
+      .then(reply => {
+        if (!reply || reply.ok !== true) throw new Error((reply && reply.error) || "sync failed");
+        return reply;
+      });
+  }
+
+  function libFormatCode(code) {
+    return code.replace(/(.{3})(?=.)/g, "$1-");
+  }
+
+  function libCleanCode(text) {
+    return String(text || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  }
+
+  function queueLibSync() {
+    clearTimeout(libSyncTimer);
+    libSyncTimer = setTimeout(() => {
+      libSync().then(changed => {
+        if (changed) libRefresh();
+      });
+    }, 2500);
+  }
+
+  function libSync() {
+    const start = libRead();
+    if (!start.code || !STATS_URL) return Promise.resolve(false);
+    if (libSyncing) {
+      libSyncAgain = true;
+      return libSyncing;
+    }
+    libSyncing = libPost({ op: "load", code: start.code })
+      .then(reply => {
+        const local = libRead();
+        const before = JSON.stringify(libPayload(local));
+        const merged = libMerge(local, reply.data || {});
+        const after = JSON.stringify(libPayload(merged));
+        const remote = JSON.stringify(libPayload(libMerge({ rankings: [], folders: [], dead: {} }, reply.data || {})));
+        if (after !== before) libWrite(merged, true);
+        const push = after === remote ? Promise.resolve() : libPost({ op: "save", code: merged.code, data: libPayload(merged) });
+        return push.then(() => after !== before);
+      })
+      .catch(error => {
+        console.warn("Library sync failed:", error && error.message);
+        return false;
+      })
+      .finally(() => {
+        libSyncing = null;
+        if (libSyncAgain) {
+          libSyncAgain = false;
+          queueLibSync();
+        }
+      });
+    return libSyncing;
+  }
+
+  function libRefresh() {
+    const parts = location.hash.replace(/^#\/?/, "").split("/");
+    if (parts[0] === LIB_ID && !document.querySelector(".modal:not(.is-closing)")) showLibrary(parts, navToken, true);
+  }
+
+  function libCoverCells(entries) {
+    const cells = [];
+    const seen = {};
+    const one = entries.length === 1 || libTeamKey(entries).length === 1;
+    if (!entries.length) return '<span class="lib-cover lib-cover-empty">' + BOOKMARK + "</span>";
+    if (one) {
+      const entry = entries[0];
+      const team = libTeam(entry);
+      if (!team) return '<span class="lib-cover lib-cover-empty">' + BOOKMARK + "</span>";
+      const kit = kitOf(team);
+      return '<span class="lib-cover lib-cover-one" style="background:' + esc(kit.header || kit.primary) + '">' + libCrest(entry, team, "lib-cover-crest") + "</span>";
+    }
+    entries.forEach(entry => {
+      if (cells.length >= 4) return;
+      const team = libTeam(entry);
+      if (!team) return;
+      const key = libIsCustom(entry) ? CUSTOM_ID + ":" + (entry.cfg && entry.cfg.name) : entry.squad;
+      if (!(key in seen)) {
+        seen[key] = 0;
+        const kit = kitOf(team);
+        cells.push('<span class="lib-cell" style="background:' + esc(kit.header || kit.primary) + '">' + libCrest(entry, team, "lib-cell-crest") + "</span>");
+        return;
+      }
+      const keys = libFlat(entry).filter(k => lookup(k));
+      const hit = keys[seen[key]] && lookup(keys[seen[key]]);
+      seen[key] += 1;
+      if (hit) cells.push(libPhotoCell(hit));
+    });
+    let round = 0;
+    while (cells.length < 4 && round < 4) {
+      entries.forEach(entry => {
+        if (cells.length >= 4) return;
+        const keys = libFlat(entry).filter(k => lookup(k));
+        const hit = keys[round] && lookup(keys[round]);
+        if (hit) cells.push(libPhotoCell(hit));
+      });
+      round += 1;
+    }
+    return '<span class="lib-cover">' + cells.slice(0, 4).join("") + "</span>";
+  }
+
+  function libTeamKey(entries) {
+    return entries.map(e => (libIsCustom(e) ? CUSTOM_ID + ":" + (e.cfg && e.cfg.name) : e.squad)).filter((k, i, all) => all.indexOf(k) === i);
+  }
+
+  function libCrest(entry, team, cls) {
+    if (libIsCustom(entry)) return '<span class="lib-byo ' + cls + '" style="' + themeVars(team) + '">' + customBadge("lib-byo-badge") + "</span>";
+    return plainCrest(team, cls);
+  }
+
+  function libPhotoCell(hit) {
+    const kit = kitOf(hit.team);
+    return (
+      '<span class="lib-cell lib-cell-photo" style="background:' + esc(kit.photoBg || kit.accent) + '">' +
+        '<span class="avatar lib-cell-avatar" style="' + themeVars(hit.team) + '">' +
+          '<span class="avatar-fallback"><span>' + esc(hit.player.number != null ? hit.player.number : "") + "</span></span>" +
+          imgTag(photoPaths(hit.team, hit.player)) +
+        "</span>" +
+      "</span>"
+    );
+  }
+
+  function libFolderTile(href, name, entries, extra) {
+    return (
+      '<button type="button" class="lib-folder' + (extra || "") + '" data-go="' + href + '">' +
+        libCoverCells(entries) +
+        '<span class="lib-folder-name">' + esc(name) + "</span>" +
+        '<span class="lib-folder-count">' + entries.length + (entries.length === 1 ? " ranking" : " rankings") + "</span>" +
+      "</button>"
+    );
+  }
+
+  const LIB_PARTICLES = ["de", "da", "do", "dos", "das", "di", "del", "della", "van", "von", "der", "den", "le", "la", "el", "al", "ter", "ten", "mac", "st"];
+
+  function libShortName(name) {
+    const parts = String(name).trim().split(/\s+/);
+    if (parts.length < 2) return String(name);
+    let start = parts.length - 1;
+    while (start > 1 && LIB_PARTICLES.includes(parts[start - 1].toLowerCase())) start -= 1;
+    return parts.slice(start).join(" ");
+  }
+
+  function libCard(entry) {
+    const team = libTeam(entry);
+    if (!team) return "";
+    const kit = kitOf(team);
+    const top = [];
+    let rank = 1;
+    libGroups(entry).forEach(g => {
+      g.forEach(key => {
+        if (top.length < 3) top.push({ hit: lookup(key), rank, tied: g.length > 1 });
+      });
+      rank += g.length;
+    });
+    const href = LIB_ID + "/r/" + entry.id;
+    return (
+      '<article class="lib-card" data-id="' + entry.id + '" style="' + themeVars(team) + '">' +
+        '<button type="button" class="lib-card-head" data-go="' + href + '" style="background:' + esc(kit.header || kit.primary) + ";color:" + esc(kit.onHeader || kit.onPrimary) + '">' +
+          libCrest(entry, team, "lib-card-crest") +
+          '<span class="lib-card-text"><span class="lib-card-title">' + esc(libTitle(entry)) + "</span>" +
+          '<span class="lib-card-sub">' + esc(libSub(entry)) + "</span></span>" +
+        "</button>" +
+        '<button type="button" class="lib-top" data-go="' + href + '" aria-label="Open ranking">' +
+          top.map(t =>
+            '<span class="lib-top-item">' +
+              '<span class="lib-top-photo">' + avatarMarkup(t.hit.team, t.hit.player, "lib-top-avatar") + '<span class="lib-top-rank">' + t.rank + (t.tied ? "=" : "") + "</span></span>" +
+              '<span class="lib-top-name">' + esc(libShortName(t.hit.player.name)) + "</span>" +
+            "</span>"
+          ).join("") +
+        "</button>" +
+        '<div class="lib-card-foot"><span>' + esc(libDate(entry.at)) + "</span>" +
+          '<button type="button" class="lib-more" data-menu="' + entry.id + '" aria-label="More options" aria-haspopup="menu">' + DOTS + "</button>" +
+        "</div>" +
+      "</article>"
+    );
+  }
+
+  function libMatches(entry, q) {
+    if (!q) return true;
+    const text = normText([libTitle(entry), libSquadName(entry)].concat(libFlat(entry).map(key => {
+      const hit = lookup(key);
+      return hit ? hit.player.name : "";
+    })).join(" "));
+    return normText(q).split(" ").every(token => wordStarts(text, token));
+  }
+
+  function libSearchBox(placeholder) {
+    return (
+      '<div class="search lib-search" role="search">' +
+        SEARCH_ICON +
+        '<input type="search" class="search-input lib-search-input" placeholder="' + esc(placeholder) + '" aria-label="' + esc(placeholder) + '" autocomplete="off" autocapitalize="off" spellcheck="false" value="' + esc(libQuery.q) + '">' +
+        '<button type="button" class="search-clear lib-search-clear" aria-label="Clear search"' + (libQuery.q ? "" : " hidden") + ">" + CROSS + "</button>" +
+      "</div>"
+    );
+  }
+
+  function wireLibSearch(paintBody) {
+    const input = app.querySelector(".lib-search-input");
+    const clear = app.querySelector(".lib-search-clear");
+    if (!input) return;
+    const update = () => {
+      libQuery.q = input.value;
+      clear.hidden = !input.value;
+      const body = app.querySelector(".lib-body");
+      if (body) {
+        body.innerHTML = paintBody();
+        wireImages(body);
+      }
+    };
+    input.addEventListener("input", update);
+    clear.addEventListener("click", () => {
+      input.value = "";
+      update();
+      input.focus();
+    });
+  }
+
+  function showLibrary(parts, token, keep) {
+    session = null;
+    const page = parts.slice(1).join("/");
+    if (libQuery.page !== page) libQuery = { page, q: "" };
+    libImport()
+      .then(lib => ensureLibTeams(lib.rankings))
+      .then(() => {
+        if (token !== navToken) return;
+        const paint = () => paintLibrary(parts, keep);
+        if (keep) paint();
+        else swapScreen(paint);
+        if (!keep) libSync().then(changed => {
+          if (changed && token === navToken) libRefresh();
+        });
+      });
+  }
+
+  function paintLibrary(parts, keep) {
+    const lib = libRead();
+    if (parts[1] === "r" && parts[2]) {
+      const entry = lib.rankings.find(r => r.id === parts[2]);
+      if (entry && libTeam(entry)) return renderLibRanking(entry, keep);
+    }
+    applyTheme(null);
+    if (parts[1] === "all") return renderLibFolder(lib, null, keep);
+    if (parts[1] === "f" && parts[2]) {
+      const folder = lib.folders.find(f => f.id === parts[2]);
+      if (folder) return renderLibFolder(lib, folder, keep);
+    }
+    renderLibHome(lib, keep);
+  }
+
+  function libSyncButton(short) {
+    if (!STATS_URL) return "";
+    return '<button type="button" class="btn btn-primary lib-head-btn" data-act="sync">' +
+      '<span class="lib-wide">' + (libRead().code ? "Synced · show code" : "Sync with another browser") + "</span>" +
+      '<span class="lib-narrow">' + esc(short) + "</span></button>";
+  }
+
+  function renderLibHome(lib, keep) {
+    const byId = {};
+    lib.rankings.forEach(r => { byId[r.id] = r; });
+    const body = () => {
+      const q = libQuery.q.trim();
+      const all = libRead();
+      const map = {};
+      all.rankings.forEach(r => { map[r.id] = r; });
+      if (!all.rankings.length && !all.folders.length) {
+        return (
+          '<div class="lib-empty">' +
+            '<p class="lib-empty-title">No saved rankings yet</p>' +
+            '<p class="lib-empty-text">Finish any ranking and it gets saved here automatically.</p>' +
+            '<button type="button" class="btn btn-primary" data-go="">Pick a squad</button>' +
+          "</div>"
+        );
+      }
+      if (q) {
+        const folders = all.folders.filter(f => wordStarts(normText(f.name), normText(q)));
+        const hits = all.rankings.filter(r => libMatches(r, q));
+        if (!folders.length && !hits.length) return '<p class="lib-none">Nothing matches "' + esc(q) + '".</p>';
+        return (
+          (folders.length ? '<div class="lib-folders">' + folders.map(f => libFolderTile(LIB_ID + "/f/" + f.id, f.name, f.ids.map(id => map[id]).filter(Boolean))).join("") + "</div>" : "") +
+          (hits.length ? '<div class="lib-cards">' + hits.map(libCard).join("") + "</div>" : "")
+        );
+      }
+      return (
+        '<div class="lib-folders">' +
+          libFolderTile(LIB_ID + "/all", "All rankings", all.rankings) +
+          all.folders.map(f => libFolderTile(LIB_ID + "/f/" + f.id, f.name, f.ids.map(id => map[id]).filter(Boolean))).join("") +
+          '<button type="button" class="lib-folder lib-folder-new" data-act="new-folder">' +
+            '<span class="lib-cover lib-cover-new"><span aria-hidden="true">+</span></span>' +
+            '<span class="lib-folder-name">New folder</span>' +
+          "</button>" +
+        "</div>"
+      );
+    };
+    render(
+      '<section class="lib">' +
+        '<button type="button" class="back-link" data-go="">' + BACK + "All squads</button>" +
+        '<p class="eyebrow">Saved on this device</p>' +
+        '<div class="lib-head">' +
+          "<h1>My rankings</h1>" +
+          libSyncButton("Sync") +
+        "</div>" +
+        libSearchBox("Search your rankings") +
+        '<div class="lib-body">' + body() + "</div>" +
+      "</section>",
+      keep
+    );
+    wireLibSearch(body);
+    wireLibPage();
+  }
+
+  function renderLibFolder(lib, folder, keep) {
+    const body = () => {
+      const all = libRead();
+      const current = folder ? all.folders.find(f => f.id === folder.id) : null;
+      const list = current ? current.ids.map(id => all.rankings.find(r => r.id === id)).filter(Boolean) : all.rankings;
+      const hits = list.filter(r => libMatches(r, libQuery.q.trim()));
+      if (!list.length) {
+        return '<p class="lib-none">' + (folder ? "Nothing in this folder yet. Use the ••• menu on any ranking to add it here." : "No saved rankings yet.") + "</p>";
+      }
+      if (!hits.length) return '<p class="lib-none">Nothing matches "' + esc(libQuery.q.trim()) + '".</p>';
+      return '<div class="lib-cards">' + hits.map(libCard).join("") + "</div>";
+    };
+    const count = folder ? folder.ids.filter(id => lib.rankings.some(r => r.id === id)).length : lib.rankings.length;
+    render(
+      '<section class="lib" data-folder="' + (folder ? folder.id : "") + '">' +
+        '<button type="button" class="back-link" data-go="' + LIB_ID + '">' + BACK + "My rankings</button>" +
+        '<p class="eyebrow">' + (folder ? "Folder · " : "") + count + (count === 1 ? " ranking" : " rankings") + "</p>" +
+        '<div class="lib-head">' +
+          "<h1>" + esc(folder ? folder.name : "All rankings") + "</h1>" +
+          (folder ? '<button type="button" class="btn btn-primary lib-head-btn" data-act="rename-folder">Rename</button>' : libSyncButton("Sync")) +
+        "</div>" +
+        libSearchBox(folder ? "Search in " + folder.name : "Search your rankings") +
+        '<div class="lib-body">' + body() + "</div>" +
+      "</section>",
+      keep
+    );
+    wireLibSearch(body);
+    wireLibPage(folder);
+  }
+
+  function libRankRows(team, ranking, kit, custom) {
+    const rows = [];
+    ranking.forEach(row => row.ids.forEach(key => {
+      const hit = lookup(key);
+      if (!hit) return;
+      const tied = row.ids.length > 1;
+      rows.push(
+        '<li class="rank-row" data-rank="' + row.rank + '" style="--s:' + rankScale(row.rank).toFixed(3) + ";--t:" + rowTint(kit, row.rank).toFixed(3) + '">' +
+          '<span class="rank-num">' + row.rank + (tied ? "<small>=</small>" : "") + "</span>" +
+          '<span class="rank-slot">' + avatarMarkup(hit.team, hit.player, "avatar-rank") + "</span>" +
+          '<span class="rank-text">' +
+            '<span class="rank-name">' + esc(hit.player.name) + "</span>" +
+            '<span class="rank-meta">' + esc(custom ? POSITIONS[hit.player.position] + " · " + clubLabel(hit.team) : playerMeta(POSITIONS[hit.player.position], hit.player)) + "</span>" +
+          "</span>" +
+        "</li>"
+      );
+    }));
+    return rows.join("");
+  }
+
+  function renderLibRanking(entry, keep) {
+    const team = libTeam(entry);
+    const custom = libIsCustom(entry);
+    const state = libState(entry);
+    session = { team, state, saved: entry.id };
+    applyTheme(team);
+    const kit = kitOf(team);
+    const ranking = MergeSorter.ranking(state);
+    render(
+      '<section class="results lib-view">' +
+        '<button type="button" class="back-link" data-go="' + LIB_ID + '">' + BACK + "My rankings</button>" +
+        '<div class="setup-head">' +
+          (custom ? customBadge("crest-lg") : crestMarkup(team, "crest-lg")) +
+          "<div>" +
+            '<p class="eyebrow">Saved ranking · ' + esc(libDate(entry.at)) + "</p>" +
+            "<h1>" + esc(libTitle(entry)) + "</h1>" +
+            '<p class="lib-view-sub">' + esc(libSub(entry)) + "</p>" +
+          "</div>" +
+          '<div class="results-side">' + kitPicker(team) + "</div>" +
+        "</div>" +
+        '<div class="setup-actions results-actions">' +
+          '<button class="btn btn-primary" data-act="share">Share ranking</button>' +
+          '<button class="btn btn-ghost" data-act="folder">Add to folder</button>' +
+          '<button class="btn btn-ghost" data-act="rename">Rename</button>' +
+          '<button class="btn btn-ghost" data-act="again">' + (custom ? "Edit &amp; sort again" : "Sort this squad again") + "</button>" +
+          '<button class="btn btn-ghost" data-act="delete">Delete</button>' +
+        "</div>" +
+        '<ol class="rank-list">' + libRankRows(team, ranking, kit, custom) + "</ol>" +
+      "</section>",
+      keep
+    );
+    app.querySelector('[data-act="share"]').addEventListener("click", () => openShare(team, shareEntries(ranking, custom)));
+    app.querySelector('[data-act="folder"]').addEventListener("click", () => openFolderPicker(entry.id));
+    app.querySelector('[data-act="rename"]').addEventListener("click", () => renameRanking(entry.id));
+    app.querySelector('[data-act="again"]').addEventListener("click", () => libSortAgain(entry));
+    app.querySelector('[data-act="delete"]').addEventListener("click", () => confirmDelete(entry.id, () => go(LIB_ID)));
+  }
+
+  function libSortAgain(entry) {
+    if (libIsCustom(entry)) {
+      const cfg = entry.cfg || {};
+      saveCustom({ keys: libFlat(entry).filter(key => lookup(key)).slice(0, CUSTOM_MAX), name: cfg.name || "", colours: cfg.colours || "neutral" });
+      storeDel(CUSTOM_ID);
+      go(CUSTOM_ID);
+      return;
+    }
+    storeDel(entry.squad);
+    go(entry.squad);
+  }
+
+  function wireLibPage(folder) {
+    const sync = app.querySelector('.lib [data-act="sync"]');
+    if (sync) sync.addEventListener("click", openSyncModal);
+    const add = app.querySelector('.lib-head-btn[data-act="rename-folder"]');
+    if (add && folder) add.addEventListener("click", () => libFolderModal(folder));
+    app.querySelector(".lib").addEventListener("click", e => {
+      const fresh = e.target.closest('[data-act="new-folder"]');
+      if (fresh) {
+        libPrompt({ title: "New folder", label: "Folder name", value: "", confirm: "Create" }, name => {
+          libNewFolder(name);
+          libRefresh();
+        });
+        return;
+      }
+      const more = e.target.closest("[data-menu]");
+      if (more) libMenu(more, more.dataset.menu, folder);
+    });
+  }
+
+  function libMenu(button, id, folder) {
+    const open = document.querySelector(".lib-menu");
+    if (open) {
+      const same = open.dataset.for === id;
+      open.remove();
+      if (same) return;
+    }
+    const lib = libRead();
+    const entry = lib.rankings.find(r => r.id === id);
+    if (!entry) return;
+    const custom = libIsCustom(entry);
+    const items = [
+      ["open", "Open ranking"],
+      ["share", "Share"],
+      ["folder", "Add to folder"]
+    ];
+    if (folder) items.push(["unfile", "Remove from this folder"]);
+    items.push(["rename", "Rename"], ["again", custom ? "Edit & sort again" : "Sort this squad again"], ["delete", "Delete"]);
+    const menu = document.createElement("div");
+    menu.className = "lib-menu";
+    menu.dataset.for = id;
+    menu.setAttribute("role", "menu");
+    menu.innerHTML = items.map(([act, label]) => '<button type="button" role="menuitem" data-item="' + act + '"' + (act === "delete" ? ' class="is-danger"' : "") + ">" + esc(label) + "</button>").join("");
+    button.closest(".lib-card").appendChild(menu);
+    const close = () => {
+      menu.remove();
+      document.removeEventListener("click", outside, true);
+      document.removeEventListener("keydown", onKey);
+    };
+    const outside = e => {
+      if (!menu.contains(e.target) && e.target.closest("[data-menu]") !== button) close();
+    };
+    const onKey = e => {
+      if (e.key === "Escape") close();
+    };
+    setTimeout(() => document.addEventListener("click", outside, true), 0);
+    document.addEventListener("keydown", onKey);
+    menu.addEventListener("click", e => {
+      const item = e.target.closest("[data-item]");
+      if (!item) return;
+      close();
+      const act = item.dataset.item;
+      if (act === "open") go(LIB_ID + "/r/" + id);
+      else if (act === "share") {
+        const team = libTeam(entry);
+        const state = libState(entry);
+        session = { team, state, saved: id };
+        openShare(team, shareEntries(MergeSorter.ranking(state), custom));
+      } else if (act === "folder") openFolderPicker(id);
+      else if (act === "unfile") {
+        libToggleFolder(folder.id, id, false);
+        libRefresh();
+      } else if (act === "rename") renameRanking(id);
+      else if (act === "again") libSortAgain(entry);
+      else if (act === "delete") confirmDelete(id, libRefresh);
+    });
+    const first = menu.querySelector("button");
+    if (first) first.focus();
+  }
+
+  function libModal(title, inner) {
+    const modal = document.createElement("div");
+    modal.className = "modal lib-modal";
+    modal.innerHTML =
+      '<div class="modal-card lib-modal-card" role="dialog" aria-modal="true" aria-labelledby="libModalTitle">' +
+        '<div class="modal-head"><h2 id="libModalTitle">' + esc(title) + "</h2>" +
+          '<button type="button" class="modal-close" data-act="close" aria-label="Close">' + CROSS + "</button></div>" +
+        '<div class="lib-modal-body">' + inner + "</div>" +
+      "</div>";
+    const onKey = e => {
+      if (e.key === "Escape") close();
+    };
+    const close = () => {
+      closeModal(modal);
+      document.removeEventListener("keydown", onKey);
+    };
+    modal.addEventListener("click", e => {
+      if (e.target === modal || e.target.closest('[data-act="close"]')) close();
+    });
+    document.addEventListener("keydown", onKey);
+    openModal(modal);
+    return { modal, close };
+  }
+
+  function libPrompt(opts, onDone, extra) {
+    const { modal, close } = libModal(opts.title,
+      '<form class="lib-form">' +
+        '<label class="setup-label" for="libPromptInput">' + esc(opts.label) + "</label>" +
+        '<input id="libPromptInput" class="lib-input" maxlength="' + (opts.max || LIB_FOLDER_MAX) + '" autocomplete="off" value="' + esc(opts.value || "") + '" placeholder="' + esc(opts.placeholder || "") + '">' +
+        '<div class="lib-form-actions">' +
+          (extra ? '<button type="button" class="btn btn-ghost lib-danger" data-act="extra">' + esc(extra.label) + "</button>" : "") +
+          '<button type="submit" class="btn btn-primary">' + esc(opts.confirm) + "</button>" +
+        "</div>" +
+      "</form>"
+    );
+    const input = modal.querySelector("input");
+    setTimeout(() => {
+      input.focus();
+      input.select();
+    }, 60);
+    modal.querySelector("form").addEventListener("submit", e => {
+      e.preventDefault();
+      const value = input.value.trim();
+      if (!value && !opts.allowEmpty) {
+        input.focus();
+        return;
+      }
+      close();
+      onDone(value);
+    });
+    if (extra) modal.querySelector('[data-act="extra"]').addEventListener("click", () => {
+      close();
+      extra.run();
+    });
+  }
+
+  function libFolderModal(folder) {
+    libPrompt({ title: "Rename folder", label: "Folder name", value: folder.name, confirm: "Save" }, name => {
+      libRenameFolder(folder.id, name);
+      libRefresh();
+    }, {
+      label: "Delete folder",
+      run: () => libConfirm("Delete this folder?", "The rankings inside stay in All rankings.", "Delete folder", () => {
+        libDeleteFolder(folder.id);
+        go(LIB_ID);
+      })
+    });
+  }
+
+  function renameRanking(id) {
+    const entry = libRead().rankings.find(r => r.id === id);
+    if (!entry) return;
+    libPrompt({ title: "Rename ranking", label: "Title", value: entry.title || "", placeholder: libDefaultTitle(entry), confirm: "Save", max: LIB_TITLE_MAX, allowEmpty: true }, title => {
+      libUpdate(id, e => { e.title = title.slice(0, LIB_TITLE_MAX); });
+      libRefresh();
+    });
+  }
+
+  function libConfirm(title, text, label, onYes) {
+    const { modal, close } = libModal(title,
+      '<p class="lib-modal-text">' + esc(text) + "</p>" +
+      '<div class="lib-form-actions">' +
+        '<button type="button" class="btn btn-ghost" data-act="close">Cancel</button>' +
+        '<button type="button" class="btn btn-primary lib-danger-fill" data-act="yes">' + esc(label) + "</button>" +
+      "</div>"
+    );
+    modal.querySelector('[data-act="yes"]').addEventListener("click", () => {
+      close();
+      onYes();
+    });
+  }
+
+  function confirmDelete(id, after) {
+    libConfirm("Delete this ranking?", "It will be removed from My rankings and every folder.", "Delete", () => {
+      libDelete(id);
+      toast("Ranking deleted");
+      after();
+    });
+  }
+
+  function openFolderPicker(id) {
+    const list = () => {
+      const lib = libRead();
+      if (!lib.folders.length) return '<p class="lib-modal-text">No folders yet. Make one below.</p>';
+      return '<div class="lib-picks">' + lib.folders.map(f =>
+        '<label class="lib-pick"><input type="checkbox" data-folder="' + f.id + '"' + (f.ids.includes(id) ? " checked" : "") + ">" +
+          '<span class="lib-pick-box" aria-hidden="true"></span>' +
+          '<span class="lib-pick-name">' + esc(f.name) + "</span>" +
+          '<span class="lib-pick-count">' + f.ids.length + "</span></label>"
+      ).join("") + "</div>";
+    };
+    const { modal, close } = libModal("Add to folder",
+      '<div class="lib-picks-wrap">' + list() + "</div>" +
+      '<form class="lib-form lib-new-row">' +
+        '<input class="lib-input" maxlength="' + LIB_FOLDER_MAX + '" placeholder="New folder name" aria-label="New folder name" autocomplete="off">' +
+        '<button type="submit" class="btn btn-ghost">Create</button>' +
+      "</form>" +
+      '<div class="lib-form-actions"><button type="button" class="btn btn-primary" data-act="done">Done</button></div>'
+    );
+    const wrap = modal.querySelector(".lib-picks-wrap");
+    wrap.addEventListener("change", e => {
+      const box = e.target.closest("[data-folder]");
+      if (box) libToggleFolder(box.dataset.folder, id, box.checked);
+    });
+    modal.querySelector(".lib-new-row").addEventListener("submit", e => {
+      e.preventDefault();
+      const input = e.target.querySelector("input");
+      const name = input.value.trim();
+      if (!name) return;
+      libNewFolder(name, id);
+      input.value = "";
+      wrap.innerHTML = list();
+    });
+    modal.querySelector('[data-act="done"]').addEventListener("click", () => {
+      close();
+      libRefresh();
+    });
+    modal.addEventListener("click", e => {
+      if (e.target === modal || e.target.closest('[data-act="close"]')) setTimeout(libRefresh, 220);
+    });
+  }
+
+  function openSyncModal() {
+    const lib = libRead();
+    const has = !!lib.code;
+    const { modal, close } = libModal("Sync your rankings",
+      (has
+        ? '<p class="lib-modal-text">Use this code on another browser or device to load the same library. Anyone with the code can see and edit it, so keep it private.</p>' +
+          '<div class="lib-code"><span class="lib-code-text">' + esc(libFormatCode(lib.code)) + "</span>" +
+            '<button type="button" class="btn btn-ghost" data-act="copy">Copy</button></div>'
+        : '<p class="lib-modal-text">Get a code to keep the same rankings and folders on every browser or device you use.</p>' +
+          '<button type="button" class="btn btn-primary lib-create" data-act="create">Get a sync code</button>') +
+      '<div class="lib-or"><span>or</span></div>' +
+      '<form class="lib-form">' +
+        '<label class="setup-label" for="libCodeInput">Have a code from another browser?</label>' +
+        '<div class="lib-new-row"><input id="libCodeInput" class="lib-input lib-code-input" maxlength="13" placeholder="KX7-Q2M-P9F" autocomplete="off" autocapitalize="characters" spellcheck="false">' +
+        '<button type="submit" class="btn btn-primary">Load</button></div>' +
+      "</form>" +
+      '<p class="lib-note" role="status">Changes sync automatically once a code is set up. Clearing your browser data won\'t lose anything.</p>' +
+      (has ? '<button type="button" class="link-btn lib-unlink" data-act="unlink">Stop syncing on this browser</button>' : "")
+    );
+    const note = modal.querySelector(".lib-note");
+    const busy = (el, on) => {
+      if (el) el.disabled = on;
+    };
+    const copy = modal.querySelector('[data-act="copy"]');
+    if (copy) copy.addEventListener("click", () => {
+      copyText(libFormatCode(lib.code)).then(() => { copy.textContent = "Copied"; }).catch(() => {});
+    });
+    const create = modal.querySelector('[data-act="create"]');
+    if (create) create.addEventListener("click", () => {
+      busy(create, true);
+      note.textContent = "Making your code…";
+      libPost({ op: "create", data: libPayload(libRead()) })
+        .then(reply => {
+          const now = libRead();
+          now.code = libCleanCode(reply.code);
+          libWrite(now, true);
+          close();
+          libRefresh();
+          openSyncModal();
+        })
+        .catch(() => {
+          busy(create, false);
+          note.textContent = "Couldn't make a code right now. Try again in a minute.";
+        });
+    });
+    modal.querySelector("form").addEventListener("submit", e => {
+      e.preventDefault();
+      const input = modal.querySelector(".lib-code-input");
+      const code = libCleanCode(input.value);
+      if (code.length !== 9) {
+        note.textContent = "Codes have 9 letters and numbers, like KX7-Q2M-P9F.";
+        input.focus();
+        return;
+      }
+      const submit = e.target.querySelector('button[type="submit"]');
+      busy(submit, true);
+      note.textContent = "Loading…";
+      libPost({ op: "load", code })
+        .then(reply => {
+          const merged = libMerge(libRead(), reply.data || {});
+          merged.code = code;
+          libWrite(merged, true);
+          return libPost({ op: "save", code, data: libPayload(merged) }).then(() => merged);
+        })
+        .then(merged => {
+          close();
+          toast("Loaded " + merged.rankings.length + (merged.rankings.length === 1 ? " ranking" : " rankings"));
+          const parts = location.hash.replace(/^#\/?/, "").split("/");
+          showLibrary(parts[0] === LIB_ID ? parts : [LIB_ID], navToken, true);
+        })
+        .catch(error => {
+          busy(submit, false);
+          note.textContent = error && error.message === "not found" ? "That code doesn't match any library." : "Couldn't load that code right now. Try again in a minute.";
+        });
+    });
+    const unlink = modal.querySelector('[data-act="unlink"]');
+    if (unlink) unlink.addEventListener("click", () => {
+      const now = libRead();
+      now.code = "";
+      libWrite(now, true);
+      close();
+      libRefresh();
+      toast("This browser stopped syncing. Your rankings stay here.");
+    });
+  }
+
+  function libSaveBox(team, state) {
+    const slot = app.querySelector(".lib-save-slot");
+    if (!slot) return;
+    const entry = libAutoSave(team, state);
+    if (!entry) {
+      slot.innerHTML =
+        '<div class="lib-save is-off">' +
+          '<p class="lib-save-status">Not in My rankings</p>' +
+          '<button type="button" class="btn btn-ghost" data-act="lib-add">Save to My rankings</button>' +
+        "</div>";
+      slot.querySelector('[data-act="lib-add"]').addEventListener("click", () => {
+        const custom = isCustom(team);
+        const cfg = custom ? { name: customConfig().name, colours: customConfig().colours } : null;
+        libAdd(custom ? CUSTOM_ID : team.id, MergeSorter.ranking(state).map(row => row.ids.slice()), cfg, false);
+        libSaveBox(team, state);
+      });
+      return;
+    }
+    const ask = libAsk && libAsk.id === entry.id && libRead().rankings.some(r => r.id === libAsk.prev) ? libAsk : null;
+    slot.innerHTML =
+      '<div class="lib-save">' +
+        '<p class="lib-save-status">Saved to <button type="button" class="link-btn" data-go="' + LIB_ID + '">My rankings</button></p>' +
+        '<div class="lib-save-row">' +
+          '<input class="lib-input lib-save-title" maxlength="' + LIB_TITLE_MAX + '" aria-label="Ranking title" placeholder="' + esc(libDefaultTitle(entry)) + '" value="' + esc(entry.title || "") + '">' +
+          '<button type="button" class="btn btn-ghost" data-act="lib-folder">Add to folder</button>' +
+        "</div>" +
+        (ask
+          ? '<div class="lib-ask"><span>You already have ' + esc(isCustom(team) ? "this list" : "a " + (team.shortName || team.name) + " ranking") + " from " + esc(libDate(ask.at)) + ".</span>" +
+              '<span class="lib-ask-acts"><button type="button" class="link-btn" data-act="keep">Keep both</button><span aria-hidden="true">·</span>' +
+              '<button type="button" class="link-btn" data-act="replace">Replace the old one</button></span></div>'
+          : "") +
+      "</div>";
+    const input = slot.querySelector(".lib-save-title");
+    let timer = null;
+    input.addEventListener("input", () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => libUpdate(entry.id, e => { e.title = input.value.trim().slice(0, LIB_TITLE_MAX); }), 400);
+    });
+    input.addEventListener("keydown", e => {
+      if (e.key === "Enter") input.blur();
+    });
+    input.addEventListener("blur", () => {
+      clearTimeout(timer);
+      libUpdate(entry.id, e => { e.title = input.value.trim().slice(0, LIB_TITLE_MAX); });
+    });
+    slot.querySelector('[data-act="lib-folder"]').addEventListener("click", () => openFolderPicker(entry.id));
+    const keep = slot.querySelector('[data-act="keep"]');
+    if (keep) keep.addEventListener("click", () => {
+      libAsk = null;
+      const box = slot.querySelector(".lib-ask");
+      if (box) box.remove();
+    });
+    const replace = slot.querySelector('[data-act="replace"]');
+    if (replace) replace.addEventListener("click", () => {
+      libReplace(entry.id, ask.prev);
+      libAsk = null;
+      const box = slot.querySelector(".lib-ask");
+      if (box) box.remove();
+      toast("Old ranking replaced");
+    });
+  }
+
   function go(id) {
     try {
       history.pushState(null, "", id ? "#/" + id : location.pathname + location.search);
@@ -3577,6 +4665,10 @@
     if (leaving && !searching()) HOME_SCROLL[leaving.dataset.section] = window.scrollY;
     const token = ++navToken;
     const parts = id.split("/");
+    if (parts[0] === LIB_ID) {
+      showLibrary(parts, token);
+      return;
+    }
     if (parts[0] === CUSTOM_ID) {
       showCustom(parts, token);
       return;

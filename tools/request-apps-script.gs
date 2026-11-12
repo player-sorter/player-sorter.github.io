@@ -12,18 +12,47 @@ const RANKINGS_PER_MINUTE = 300;
 const STATS_MIN = 20;
 const STATS_CACHE_SECONDS = 900;
 const COUNTS_CACHE_KEY = "counts";
+const CUSTOM_COUNT_KEY = "CUSTOM_RANKINGS";
+const CUSTOM_SQUAD_ID = "build-your-own";
+const LINKS_SHEET = "Links";
+const LINK_ID_LENGTH = 7;
+const LINK_MAX_QUERY = 3000;
+const LINK_CACHE_SECONDS = 21600;
+const LINK_ID_PATTERN = /^[A-Za-z0-9]{4,12}$/;
+const LINK_QUERY_PATTERN = /^[A-Za-z0-9._~:%+=&*!'()-]+$/;
 const ID_PATTERN = /^[a-z0-9-]{1,60}$/;
 const DEVICE_PATTERN = /^[A-Za-z0-9-]{8,64}$/;
+const LIBRARY_SHEET = "Library";
+const LIBRARY_CHUNK = 45000;
+const LIBRARY_MAX = 450000;
+const LIBRARY_CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const LIBRARY_CODE_PATTERN = /^[A-HJ-NP-Z2-9]{9}$/;
+const LIBRARY_PER_MINUTE = 240;
 
 let rankingsBookCache_ = null;
 
 function doPost(e) {
   const lock = LockService.getScriptLock();
-  if (!lock.tryLock(20000)) return reply_(false);
+  if (!lock.tryLock(20000)) return json_({ ok: false, error: "busy" });
   try {
     const data = JSON.parse((e && e.postData && e.postData.contents) || "{}");
     if (data.website) return reply_(true);
     if (data.type === "ranking") return reply_(saveRanking_(data));
+    if (data.type === "custom") return json_(countCustom_());
+    if (data.type === "library") {
+      try {
+        return json_(library_(data));
+      } catch (error) {
+        return json_({ ok: false, error: String(error && error.message || error) });
+      }
+    }
+    if (data.type === "short") {
+      try {
+        return json_(shorten_(data));
+      } catch (error) {
+        return json_({ ok: false, error: String(error && error.message || error) });
+      }
+    }
 
     const type = TYPES[data.type];
     if (!type) return reply_(false);
@@ -56,6 +85,7 @@ function doGet(e) {
   const params = (e && e.parameter) || {};
   if (params.action === "stats") return json_(stats_(String(params.squad || "")));
   if (params.action === "counts") return json_(counts_());
+  if (params.action === "link") return json_(expand_(String(params.id || "")));
   return reply_(true);
 }
 
@@ -233,6 +263,73 @@ function stats_(squad) {
   return result;
 }
 
+function linkId_(query, salt) {
+  const chars = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  const bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, salt + "|" + query);
+  let id = "";
+  for (let i = 0; i < LINK_ID_LENGTH; i++) id += chars[(bytes[i] + 256) % 62];
+  return id;
+}
+
+function linksSheet_() {
+  const book = rankingsBook_(true);
+  let sheet = book.getSheetByName(LINKS_SHEET);
+  if (sheet) return sheet;
+  sheet = book.insertSheet(LINKS_SHEET);
+  sheet.getRange(1, 1, 1, 3).setValues([["Id", "Query", "Created"]]).setFontWeight("bold");
+  sheet.setFrozenRows(1);
+  sheet.getRange("A:A").setNumberFormat("@");
+  return sheet;
+}
+
+function findLink_(sheet, id) {
+  if (sheet.getLastRow() < 2) return null;
+  const hit = sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).createTextFinder(id).matchEntireCell(true).matchCase(true).findNext();
+  return hit ? String(sheet.getRange(hit.getRow(), 2).getValue()) : null;
+}
+
+function shorten_(data) {
+  const query = String(data.q || "");
+  if (!query || query.length > LINK_MAX_QUERY || !LINK_QUERY_PATTERN.test(query)) return { ok: false, error: "bad query" };
+  if (overLimit_("links", MAX_PER_MINUTE * 4)) return { ok: false, error: "rate limited" };
+  const cache = CacheService.getScriptCache();
+  const sheet = linksSheet_();
+  for (let salt = 0; salt < 5; salt++) {
+    const id = linkId_(query, salt);
+    const cached = cache.get("link-" + id);
+    const existing = cached != null ? cached : findLink_(sheet, id);
+    if (existing === query) return { ok: true, id: id };
+    if (existing) continue;
+    sheet.appendRow([id, query, new Date()]);
+    cache.put("link-" + id, query, LINK_CACHE_SECONDS);
+    return { ok: true, id: id };
+  }
+  return { ok: false, error: "no free id" };
+}
+
+function expand_(id) {
+  if (!LINK_ID_PATTERN.test(id)) return { ok: false };
+  const cache = CacheService.getScriptCache();
+  let query = cache.get("link-" + id);
+  if (query == null) {
+    const book = rankingsBook_(false);
+    const sheet = book && book.getSheetByName(LINKS_SHEET);
+    query = sheet ? findLink_(sheet, id) : null;
+    if (!query) return { ok: false };
+    cache.put("link-" + id, query, LINK_CACHE_SECONDS);
+  }
+  return { ok: true, q: query };
+}
+
+function countCustom_() {
+  if (overLimit_("custom", RANKINGS_PER_MINUTE)) return { ok: false, error: "rate limited" };
+  const props = PropertiesService.getScriptProperties();
+  const next = Number(props.getProperty(CUSTOM_COUNT_KEY) || 0) + 1;
+  props.setProperty(CUSTOM_COUNT_KEY, String(next));
+  CacheService.getScriptCache().remove(COUNTS_CACHE_KEY);
+  return { ok: true };
+}
+
 function counts_() {
   const cache = CacheService.getScriptCache();
   const cached = cache.get(COUNTS_CACHE_KEY);
@@ -246,6 +343,9 @@ function counts_() {
       counts[name] = Math.max(0, sheet.getLastRow() - 1);
     });
   }
+  const counted = Number(PropertiesService.getScriptProperties().getProperty(CUSTOM_COUNT_KEY) || 0);
+  const links = book && book.getSheetByName(LINKS_SHEET) ? Math.max(0, book.getSheetByName(LINKS_SHEET).getLastRow() - 1) : 0;
+  counts[CUSTOM_SQUAD_ID] = Math.max(counted, links);
   const result = { ok: true, counts: counts, updated: new Date().toISOString() };
   cache.put(COUNTS_CACHE_KEY, JSON.stringify(result), STATS_CACHE_SECONDS);
   return result;
@@ -335,4 +435,89 @@ function reply_(ok) {
 
 function json_(data) {
   return ContentService.createTextOutput(JSON.stringify(data)).setMimeType(ContentService.MimeType.JSON);
+}
+
+function librarySheet_() {
+  const book = rankingsBook_(true);
+  let sheet = book.getSheetByName(LIBRARY_SHEET);
+  if (sheet) return sheet;
+  sheet = book.insertSheet(LIBRARY_SHEET);
+  sheet.getRange(1, 1, 1, 3).setValues([["Code", "Updated", "Data"]]).setFontWeight("bold");
+  sheet.setFrozenRows(1);
+  sheet.getRange("A:A").setNumberFormat("@");
+  return sheet;
+}
+
+function findLibraryRow_(sheet, code) {
+  if (sheet.getLastRow() < 2) return 0;
+  const hit = sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).createTextFinder(code).matchEntireCell(true).matchCase(true).findNext();
+  return hit ? hit.getRow() : 0;
+}
+
+function libraryCode_() {
+  const bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, Utilities.getUuid() + "|" + Date.now());
+  let code = "";
+  for (let i = 0; i < 9; i++) code += LIBRARY_CODE_CHARS[(bytes[i] + 256) % LIBRARY_CODE_CHARS.length];
+  return code;
+}
+
+function libraryBody_(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  if (!Array.isArray(value.rankings) || !Array.isArray(value.folders)) return null;
+  const text = JSON.stringify({ rankings: value.rankings, folders: value.folders, dead: value.dead || {} });
+  return text.length > LIBRARY_MAX ? null : text;
+}
+
+function writeLibrary_(sheet, row, code, text) {
+  const chunks = [];
+  for (let i = 0; i < text.length; i += LIBRARY_CHUNK) chunks.push("~" + text.slice(i, i + LIBRARY_CHUNK));
+  const width = 2 + chunks.length;
+  if (sheet.getMaxColumns() < width) sheet.insertColumnsAfter(sheet.getMaxColumns(), width - sheet.getMaxColumns());
+  sheet.getRange(row, 1, 1, width).setValues([[code, new Date()].concat(chunks)]);
+  const last = sheet.getLastColumn();
+  if (last > width) sheet.getRange(row, width + 1, 1, last - width).clearContent();
+}
+
+function readLibrary_(sheet, row) {
+  const last = sheet.getLastColumn();
+  if (last < 3) return {};
+  const text = sheet.getRange(row, 3, 1, last - 2).getValues()[0]
+    .map(value => String(value))
+    .filter(value => value.charAt(0) === "~")
+    .map(value => value.slice(1))
+    .join("");
+  try {
+    return text ? JSON.parse(text) : {};
+  } catch (error) {
+    return {};
+  }
+}
+
+function library_(data) {
+  if (overLimit_("library", LIBRARY_PER_MINUTE)) return { ok: false, error: "rate limited" };
+  const op = String(data.op || "");
+  const sheet = librarySheet_();
+  if (op === "create") {
+    const text = libraryBody_(data.data);
+    if (text == null) return { ok: false, error: "bad data" };
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const code = libraryCode_();
+      if (findLibraryRow_(sheet, code)) continue;
+      writeLibrary_(sheet, Math.max(2, sheet.getLastRow() + 1), code, text);
+      return { ok: true, code: code };
+    }
+    return { ok: false, error: "no free code" };
+  }
+  const code = String(data.code || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (!LIBRARY_CODE_PATTERN.test(code)) return { ok: false, error: "bad code" };
+  const row = findLibraryRow_(sheet, code);
+  if (!row) return { ok: false, error: "not found" };
+  if (op === "load") return { ok: true, code: code, data: readLibrary_(sheet, row) };
+  if (op === "save") {
+    const text = libraryBody_(data.data);
+    if (text == null) return { ok: false, error: "bad data" };
+    writeLibrary_(sheet, row, code, text);
+    return { ok: true };
+  }
+  return { ok: false, error: "bad op" };
 }
