@@ -45,7 +45,7 @@ registerTeam({
       onPaperMuted: "#C8BCD4",
       primary: "#9C83B9",
       onPrimary: "#211B2B",
-      paperPrimary: "#0055A5",
+      paperPrimary: "#1463AC",
       paperOnPrimary: "#FFFFFF",
       cardBorder: "#51445F",
       line: "#51445F",

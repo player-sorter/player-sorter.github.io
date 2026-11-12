@@ -5,6 +5,7 @@ registerTeam({
   monogram: "ARG",
   league: "world-cup-2026",
   season: "2026 World Cup",
+  tile: { bg: "#FFFFFF", fg: "#0F2A4A", muted: "rgba(15,42,74,0.75)", patternOpacity: 1, pattern: { type: "gradstripes", base: "#FFFFFF", bands: ["#C4E9FB", "#8FCDF2", "#5BA9E3", "#3A80C6", "#12315C"] } },
   kits: {
     home: {
       label: "Home",
@@ -21,12 +22,12 @@ registerTeam({
       onPrimary: "#FFFFFF",
       accent: "#0F2A4A",
       onAccent: "#FFFFFF",
-      header: "#6CACE4",
+      header: "#FFFFFF",
       onHeader: "#0F2A4A",
       headerBand: "#C9A227",
       rowTint: "#2F6FAE",
       rowTintStrength: 0.15,
-      pattern: { type: "stripes", base: "#6CACE4", bands: ["#FFFFFF"] }
+      pattern: { type: "gradstripes", base: "#FFFFFF", bands: ["#C4E9FB", "#8FCDF2", "#5BA9E3", "#3A80C6", "#12315C"] }
     },
     away: {
       label: "Away",
@@ -40,10 +41,10 @@ registerTeam({
       onPrimary: "#FFFFFF",
       accent: "#FFFFFF",
       onAccent: "#0E1220",
-      header: "#111111",
+      header: "#070B1A",
       onHeader: "#FFFFFF",
-      headerBand: "#4F86D9",
-      pattern: { type: "gradient", base: "#111111", bands: ["#1E3F7A"] }
+      headerBand: "#3DB4FF",
+      pattern: { type: "leaves", base: "#070B1A", bands: ["#1F5FE0", "#3DB4FF", "#BDEBFF", "#0F3A9C"] }
     }
   },
   players: [

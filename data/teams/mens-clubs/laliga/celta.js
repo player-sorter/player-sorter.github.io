@@ -34,7 +34,7 @@ registerTeam({
       card: "#FFFFFF",
       ink: "#12324A",
       muted: "#5B6170",
-      primary: "#7EC8E3",
+      primary: "#6AA8BF",
       onPrimary: "#12324A",
       accent: "#C8102E",
       onAccent: "#FFFFFF",
@@ -45,7 +45,8 @@ registerTeam({
       rowTintStrength: 0.16,
       rowTintFloor: 0.5,
       pattern: { type: "solid", base: "#F4F1EA" },
-      photoBg: "#243656"
+      photoBg: "#243656",
+      paperPrimary: "#629BB0"
     },
     third: {
       label: "Third",

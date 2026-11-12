@@ -164,6 +164,7 @@
       ctx.fillRect(0, 0, f.w, h);
       return;
     }
+    if (p.full) { from = 0; room = f.w; }
     if (room < 150) return;
     const s = h / 100;
     const W = room / s;
@@ -211,7 +212,7 @@
       if (p.type === "scatter") Kits.stripes.dots(o, 0, 0, s, p.dots || "rgba(255,255,255,0.32)", W);
       Kits.shards(o, 0, 0, s, Kits.stripes.colors(p), Kits.stripes.list(p.type, W));
     }
-    if (p.type !== "lines" || !p.fade) {
+    if ((p.type !== "lines" || !p.fade) && !p.full) {
       // soften the edge nearest the title
       const g = o.createLinearGradient(0, 0, off.width, 0);
       g.addColorStop(0, "rgba(0,0,0,0)");
@@ -535,8 +536,50 @@
     ctx.restore();
   }
 
+  // Two thin, sharp-tipped neon curves like a cubic graph, one near each end of the banner (the
+  // flank panels of the Atletico away shirt). Each curve's lower end bends smoothly into the
+  // bottom line, so curve and line read as one shape. Soft glow behind each.
+  function neonCurves(ctx, f, k, t) {
+    const h = f.head - 14;
+    const color = t.color || k.headerBand || "#D7FF1F";
+    const amp = h * 0.17, wmax = h * 0.042, n = 80, trim = h * 0.18;
+    const R = h * 0.26, u0 = 1 - R / h;
+    const cxL = trim + wmax / 2 - 0.65 * amp;
+    const half = (u, g) => g * wmax * Math.pow(Math.sin(Math.PI * Math.min(u, 0.999)), 0.75) / 2;
+    const build = (cx, dir, g, fillet) => {
+      const outer = [], inner = [];
+      for (let i = 0; i <= n; i++) {
+        const u = i / n, v = u * 2 - 1;
+        const x = cx + dir * amp * (v * v * v - 0.35 * v);
+        const w = u < 0.5 ? half(u, g) : g * wmax / 2 * (1 - 0.0 * u);
+        let ex = 0;
+        if (fillet && u > u0) { const q = (u - u0) / (1 - u0); ex = R * (1 - Math.sqrt(Math.max(0, 1 - q * q))); }
+        outer.push([x - dir * w, u * h]);
+        inner.push([x + dir * (w + ex), u * h]);
+      }
+      return outer.concat(inner.reverse());
+    };
+    const fill = pts => { ctx.beginPath(); pts.forEach((q, i) => i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1])); ctx.closePath(); ctx.fill(); };
+    const draw = (cx, dir) => {
+      [[2.8, 0.1], [1.9, 0.16]].forEach(g => { ctx.globalAlpha = g[1]; ctx.fillStyle = color; fill(build(cx, dir, g[0], false)); });
+      ctx.globalAlpha = 1; ctx.fillStyle = color;
+      fill(build(cx, dir, 1, true));
+    };
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, 0, f.w, h + 1); ctx.clip();
+    const gl = ctx.createLinearGradient(0, h, 0, h - h * 0.4);
+    gl.addColorStop(0, color); gl.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.globalAlpha = 0.15; ctx.fillStyle = gl;
+    ctx.fillRect(0, h - h * 0.4, f.w, h * 0.4);
+    ctx.globalAlpha = 1;
+    draw(cxL, 1);
+    draw(f.w - cxL, -1);
+    ctx.restore();
+  }
+
   function headerCollar(ctx, f, k, clearX) {
     const t = k.headerDecor;
+    if (t && t.type === "neon-curves") return neonCurves(ctx, f, k, t);
     if (!t || (t.type !== "collar" && t.type !== "panel-collar")) return;
     const h = f.head - 14;
     const from = Math.max(clearX || 0, 0);

@@ -59,7 +59,7 @@ registerTeam({
       line: "rgba(0,0,0,0.16)",
       ink: "#17221E",
       muted: "#56645B",
-      primary: "#EFC676",
+      primary: "#B6965A",
       onPrimary: "#FFFFFF",
       accent: "#17221E",
       onAccent: "#FFFFFF",

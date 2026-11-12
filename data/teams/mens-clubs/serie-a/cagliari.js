@@ -73,7 +73,8 @@ registerTeam({
       rowTint: "#14110C",
       rowTintStrength: 0.14,
       rowTintFloor: 0.45,
-      pattern: {type: "ripple", base: "#97877E", bands: ["#7C6C61", "#C2B6AB"]}
+      pattern: {type: "ripple", base: "#97877E", bands: ["#7C6C61", "#C2B6AB"]},
+      onPaperMuted: "#675E4D"
     }
   },
   players: [

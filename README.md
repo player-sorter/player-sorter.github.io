@@ -90,7 +90,7 @@ Each club file has a `kits` block with `home`, `away` and `third`. Each kit sets
 - `zigzag`: horizontal zigzag lines across `base`, cycling through the band colours
 - `tipping`: plain `base` with two thin horizontal stripes near the top, like collar tipping (Bayern away)
 - `lightning`: SVG lightning bolt of the band colour at the right edge of `base` (Rayo Vallecano)
-- `dots`: vector halftone dots in the band colour on `base`, small at the bottom-left and large at the top-right (Orlando City home)
+- `dots`: vector halftone dots in the band colour on `base`, a fine halftone grid, small at the bottom-left and larger at the top-right (Orlando City)
 - `triangles`: faint embossed triangle texture in the band colour that fades toward the bottom (Getafe)
 - `cross`: Nordic cross on `base`, the first band colour as the wide cross and the second as the thin inner cross, set left of centre like the flag (Norway)
 - `diamonds`: three coloured diamonds on top of `base` (Germany)
@@ -130,6 +130,13 @@ A kit can set `headerStripes: [[colour, weight], ...]` to split the bottom band 
 - `finelines`: very fine, slightly darker vertical lines across the whole base (Uruguay home)
 - `sunstone`: the Aztec sun stone of the Mexico home shirt in tone-on-tone dark lines: hatched concentric rings inside a diamond frame with corner rings and rays, alternating along wide banners with the lower part of the shirt (XIX over five circles, an arc of glyph blocks, XXXX marks, scallops, Greek-key fret panels, a downward triangle) (Mexico home)
 - `scrolls`: a tone-on-tone baroque print of curling scroll pairs and small buds on a dotted diamond lattice (Spain away)
+- `rulestripes`: wide stripes with fine rules like the Atletico de Madrid home shirt: one thin line of the stripe colour along each edge of each band and three thin dark lines down the middle of each stripe starting at a trident (Atletico home)
+- `multistripes`: equal-width vertical stripes cycling through every band colour in order (Barcelona home card)
+- `prism`: tilted bands of stacked dark grey right triangles (a sawtooth mountain range) on near-black with black stripes between the bands, lit softly from the right, plus a neon lightning flash down the right side in the third colour (Atletico away)
+- `railstripes`: horizontal stripes in the first band colour, each framed by a thin line of the second colour above and below with a small gap, over big faint lightning-bolt shapes made only of grain, in the third colour (Atletico third)
+- `twotone`: the base colour on the left and a lighter colour on the right joined by a sawtooth edge, with tone-on-tone jagged Z ribbons in lighter and darker shades (Barcelona third; `full: true` spans the whole banner)
+- `neon-curves` (a `headerDecor` type): two thin sharp-tipped S-curves like a cubic graph, one near each end of the banner, with a soft glow (Atletico away)
+- `ribfade`: a vertical fade from the base colour (top) into the first band colour (bottom) with fine vertical ribs and a dotted knit texture over the upper part (Barcelona away; `full: true` spans the whole banner)
 - `shards`: blocky "bento" shards (mixed-size dark blocks, some cut diagonally) across `base`, with sleeve panels in the first band colour at both ends and the second band colour for the shards (West Ham home)
 - `burst`: radial rays fanning out from the upper right, wide wedges in the first band colour and thin streaks in the second (New England Revolution home)
 - `thick-waves`: bold wavy stripes in the first band colour across `base` (USA home)
@@ -141,7 +148,7 @@ A kit can set `headerStripes: [[colour, weight], ...]` to split the bottom band 
 
 A kit can set `photoBg` to colour behind player photos (defaults to `accent`) and `photoInk` for the shirt number shown when a photo is missing (defaults to `onAccent`). `labelBg` colours the name label under the photo on the voting cards (defaults to `card`). A kit can also set `headerDecor: { type: "collar", color, opacity }` to draw an extra decoration in the share image header, to the right of the title (Uruguay away uses the collar panels). `paperBg` takes any CSS background (for example a gradient) and paints it behind the squad pages instead of the flat `paper` colour; keep `paper` set to a matching solid colour (both Ballon d'Or kits use this). `cardBorder` draws a thin outline in that colour around the cards, roster tiles and result rows (the Ballon d'Or Black kit uses a soft gold). `metal` is a list of colours that gives the squad title, main buttons, VS badge and share-image title a metallic gradient (the Ballon d'Or Black kit uses gold).
 
-A team can set `tile.name` (use `
+A team can set `tile.border` (a colour, with optional `tile.borderWidth`, default 2) to draw a solid border around its home-page card (Atletico uses a red one). A team can set `tile.patternOpacity` (0 to 1, default 0.55) to show its home-page card pattern more or less strongly. A team can set `tile.name` (use `
 ` for a line break) to change how its name is written on its home-page card (Dortmund puts "Dortmund" under "Borussia"). A team can set `photoFit: "contain"` when its player photos are cut-outs that should sit fully inside the voting card instead of filling it (Deportivo uses this). A team can set `squadLabel` and `memberLabel` to replace the words "squad" and "players" (the Ballon d'Or lists use "nominees"), and players without a shirt `number` simply show no number. In the manifest, a section can set `tab` to a shorter name for its home-page tab.
 
 A manifest group with `builder: true` (and no `teams`) shows the "Build your own ranking" tile instead of squads; it currently sits first in Specials. The builder lives at `#/build-your-own`. People search every player on the site and pick 5 to 25, choose Neutral or any squad's colours, and sort them like a normal squad. Each player appears once: their newest club squad wins, then their national team, then Specials lists, matched by name plus nationality (the club's `nation` code, or the national team's `monogram`). Photos and crests always come from that player's own squad. Custom lists never count towards community rankings. "Share list" makes a link like `?list=atletico-madrid:alvarez.arsenal:saka&n=Name&c=arsenal` that loads the same list for someone else.

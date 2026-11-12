@@ -204,10 +204,10 @@
   // toward the top-right (Orlando City's "digital storm" body pattern).
   const DOTS = (function () {
     const out = [];
-    for (let row = 0, y = 4; y < 100; row++, y = 4 + row * 7) {
-      for (let x = 4 + (row % 2 ? 4 : 0); x < 200; x += 8) {
+    for (let row = 0, y = 1.6; y < 100; row++, y = 1.6 + row * 2.9) {
+      for (let x = 1.6 + (row % 2 ? 1.7 : 0); x < 200; x += 3.4) {
         const t = Math.max(0, Math.min(1, 0.55 * (x / 200) + 0.45 * (1 - y / 100)));
-        out.push([x, y, 0.5 + 3.2 * Math.pow(t, 1.15)]);
+        out.push([x, y, 0.2 + 1.25 * Math.pow(t, 1.0)]);
       }
     }
     return out;
@@ -1417,13 +1417,452 @@
     return out;
   }
 
+  // "rulestripes": wide vertical stripes in two colours with fine rules, like the Atletico de
+  // Madrid home shirt: the base colour is the thick stripe and the first band colour the wide
+  // band between them. Each band has one thin line in the base colour along each edge, each
+  // thick stripe has a thin line in the band colour just inside both edges, and three thin
+  // lines in the second band colour run down its middle from a small trident. Kinds: 0 = band,
+  // 1 = thin line in the stripe (band colour), 2 = thin lines in the band (base colour),
+  // 3 = centre lines and trident (second band colour).
+  function ruleStripeShapes() {
+    const out = [];
+    const K = GW > 300 ? 1.7 : 1.45;
+    const R = 15 * K, W = 18 * K, P = R + W;
+    const rect = (x, y, w, h) => [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
+    // on a card only the right part of the grid shows; keep its left part plain so a long name
+    // stays readable, and line a stripe up with the right-hand edge
+    const x0 = GW > 300 ? 6 * K : 78;
+    for (let i = GW > 300 ? -1 : 0; x0 + i * P < GW + P; i++) {
+      const sx = x0 + i * P;            // start of the thick stripe
+      const bx = sx + R;                // start of the band
+      out.push([0, 1, rect(bx, -2, W, 104)]);
+      // one thin line in the band along each edge
+      [1.5].forEach(o => {
+        out.push([2, 1, rect(bx + o * K, -2, 0.8 * K, 104)]);
+        out.push([2, 1, rect(bx + W - (o + 0.8) * K, -2, 0.8 * K, 104)]);
+      });
+      // three thin lines down the middle, starting under a trident
+      const cx = sx + R / 2, ly = 27;
+      [-2.4, 0, 2.4].forEach(o => out.push([3, 0.95, rect(cx + o * K - 0.35 * K, ly, 0.7 * K, 104 - ly)]));
+      const w = 0.8 * K, pr = 2.4 * K;
+      out.push([3, 1, rect(cx - w / 2, 14, w, ly - 14)]);                          // shaft
+      out.push([3, 1, rect(cx - pr - w / 2, 6, w, 11)]);                            // left prong
+      out.push([3, 1, rect(cx + pr - w / 2, 6, w, 11)]);                            // right prong
+      out.push([3, 1, rect(cx - w / 2, 2, w, 13)]);                                  // middle prong
+      out.push([3, 1, rect(cx - pr - w / 2, 15.6, 2 * pr + w, w)]);                // crossbar
+      [-1, 0, 1].forEach(d => out.push([3, 1, [[cx + d * pr - w * 1.1, 6.5], [cx + d * pr + w * 1.1, 6.5], [cx + d * pr, 2.6]]]));
+    }
+    return out;
+  }
+
+  // "multistripes": equal-width vertical stripes cycling through every band colour in order, so a
+  // kit with many shades (the Barcelona home shirt) shows them all. Kind i = band colour i.
+  function multiStripeShapes() {
+    const out = [];
+    const K = GW > 300 ? 1.5 : 1;
+    const w = 11 * K;
+    const n = (stripeColors.cur || []).length || 6;
+    for (let i = 0, x = 0; x < GW + w; i++, x += w) {
+      out.push([i % n, 1, [[x, -2], [x + w + 0.3, -2], [x + w + 0.3, 102], [x, 102]]]);
+    }
+    return out;
+  }
+
+  // "prism": tilted bands of stacked dark grey right triangles (a sawtooth mountain range) on
+  // near-black, with black stripes between the bands, like the Atletico de Madrid away shirt. Kind 0.
+  function prismShapes() {
+    const out = [];
+    const K = GW > 300 ? 1.6 : 1;
+    const w = 11 * K, h = 12 * K, P = w * 1.55, sh = w * 0.55;
+    const rows = Math.ceil(110 / h) + 3;
+    const span = Math.ceil((GW + rows * sh) / P) + 3;
+    for (let i = -2; i < span; i++) {
+      for (let j = -1; j < rows; j++) {
+        const x0 = i * P - j * sh, y = j * h - 4;
+        // one dark grey triangle per step; the near-black base shows between the bands
+        // brightness drifts smoothly across the strip (a soft light from the top right)
+        const cx = x0 + w * 0.35, cy = y + h * 0.65;
+        const lit = Math.max(0, Math.min(1, Math.pow(0.1 + 0.95 * (cx / Math.max(GW, 1)) + 0.45 * (1 - cy / 100) - 0.35, 1.25)));
+        out.push([0, 0.3 + 0.7 * lit, [[x0, y + h], [x0, y], [x0 + w, y + h]]]);
+        // a slim soft highlight along the slope of each peak
+        out.push([1, 0.04 + 0.5 * lit, [[x0 + w * 0.06, y + h * 0.9], [x0 + w * 0.06, y + h * 0.25], [x0 + w * 0.68, y + h * 0.9]]]);
+      }
+    }
+    return out;
+  }
+
+  // "railstripes": horizontal stripes in the first band colour, each framed by a thin line of the
+  // second colour above and below with a small gap of base colour between (Atletico third).
+  // Kind 0 = stripe, kind 1 = thin framing lines.
+  function railStripeShapes() {
+    const out = [];
+    const period = 27, sh = 3.6, gap = 0.9, th = 0.95;
+    const rect = (y, h) => [[-2, y], [GW + 2, y], [GW + 2, y + h], [-2, y + h]];
+    // big faint lightning shapes under the stripes, made only of grain: tiny dots packed inside each
+    // bolt silhouette and scattering softly past its edge
+    const rnd = seeded(57);
+    const K = GW > 300 ? 1.6 : 1;
+    const dot = (x, y, r, al) => {
+      const pts = [];
+      for (let i = 0; i < 4; i++) pts.push([x + Math.cos((i / 4) * Math.PI * 2 + 0.78) * r, y + Math.sin((i / 4) * Math.PI * 2 + 0.78) * r]);
+      out.push([2, al, pts]);
+    };
+    const tpl = [[0.5, -0.06], [0.98, -0.06], [0.68, 0.42], [1.04, 0.42], [0.04, 1.06], [0.36, 0.56], [-0.05, 0.56]];
+    const inside = (poly, x, y) => {
+      let c = false;
+      for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        if (((poly[i][1] > y) !== (poly[j][1] > y)) && x < ((poly[j][0] - poly[i][0]) * (y - poly[i][1])) / (poly[j][1] - poly[i][1]) + poly[i][0]) c = !c;
+      }
+      return c;
+    };
+    const Wb = 46 * K, step = 58 * K;
+    for (let x0 = -10 * K, n = 0; x0 < GW + Wb; x0 += step * (0.85 + rnd() * 0.3), n++) {
+      const flip = n % 2 ? -1 : 1, sc = 0.9 + rnd() * 0.25;
+      const poly = tpl.map(q => [x0 + (flip > 0 ? q[0] : 1 - q[0]) * Wb * sc, q[1] * 100]);
+      const minX = Math.min(...poly.map(q => q[0])) - 6 * K, maxX = Math.max(...poly.map(q => q[0])) + 6 * K;
+      const tries = Math.round((maxX - minX) * 100 * 0.55);
+      for (let t = 0; t < tries; t++) {
+        const x = minX + rnd() * (maxX - minX), y = rnd() * 112 - 6;
+        if (inside(poly, x, y)) dot(x, y, (0.18 + rnd() * 0.18) * K, 0.32 + rnd() * 0.3);
+        else if (rnd() < 0.04) dot(x, y, (0.14 + rnd() * 0.12) * K, 0.18);
+      }
+    }
+    for (let y = 6; y < 106; y += period) {
+      out.push([0, 1, rect(y, sh)]);
+      out.push([1, 1, rect(y - gap - th, th)]);
+      out.push([1, 1, rect(y + sh + gap, th)]);
+    }
+    return out;
+  }
+
+  // "twotone": the left of the kit is the base colour and the right part a lighter colour (first
+  // band colour) with a sawtooth join at `split` (default 50%) of the width, and tone-on-tone
+  // jagged Z-shaped ribbons in lighter and darker shades over the lighter part (Barcelona third).
+  // Kinds: 0 = lighter part, 1 = lighter ribbons, 2 = darker ribbons.
+  function twoToneShapes() {
+    const out = [];
+    const rnd = seeded(77);
+    const K = GW > 300 ? 1.6 : 1;
+    const xm = GW * (GW > 300 ? 0.5 : 0.3);
+    const tooth = 2.7 * K, amp = 2.1 * K;
+    const edge = [[xm, -2]];
+    for (let y = 1, i = 0; y < 104; y += tooth, i++) edge.push([xm + (i % 2 ? amp : -amp), y]);
+    edge.push([xm, 104]);
+    out.push([0, 1, edge.concat([[GW + 2, 104], [GW + 2, -2]])]);
+    const n = Math.max(5, Math.round((GW - xm) / (13 * K)));
+    for (let r = 0; r < n; r++) {
+      let x = xm + 10 * K + rnd() * (GW - xm - 14 * K);
+      const wd = (3 + rnd() * 7) * K;
+      const left = [], right = [];
+      for (let y = -6; y < 110; y += 7 + rnd() * 10) {
+        x += (rnd() - 0.5) * 11 * K;
+        left.push([x, y]); right.push([x + wd * (0.6 + rnd() * 0.8), y + 2 + rnd() * 5]);
+      }
+      out.push([r % 3 === 0 ? 2 : 1, 0.18 + rnd() * 0.3, left.concat(right.reverse())]);
+    }
+    return out;
+  }
+
+  // "ribfade": a vertical fade from the base colour (top) into the first band colour (bottom) with
+  // fine vertical ribs and a dotted knit texture over the upper part, like the Barcelona away
+  // shirt. Kinds: 0 = ribs, 1 = fade slices, 2 = knit dots. Use `full: true` on banners.
+  function ribFadeShapes() {
+    const out = [];
+    const K = GW > 300 ? 1.6 : 1;
+    const N = 36;
+    for (let i = 0; i < N; i++) {
+      // black zone is 25% taller: the purple only starts fading in after the top quarter
+      const t = Math.max(0, ((i + 0.5) / N - 0.25) / 0.75);
+      out.push([1, Math.pow(t, 1.5) * 0.95, [[-2, (i * 100) / N], [GW + 2, (i * 100) / N], [GW + 2, ((i + 1) * 100) / N + 0.4], [-2, ((i + 1) * 100) / N + 0.4]]]);
+    }
+    const step = 2.3 * K, w = 0.5 * K;
+    for (let x = 0.5 * K; x < GW; x += step) out.push([0, 0.26, [[x, -2], [x + w, -2], [x + w, 102], [x, 102]]]);
+    const ds = 1.7 * K;
+    for (let row = 0, y = 2; y < 55; row++, y += ds) {
+      for (let x = (row % 2 ? ds / 2 : 0); x < GW; x += ds) {
+        const r = 0.34 * K;
+        out.push([2, 0.3 * (1 - y / 60), [[x, y - r], [x + r, y], [x, y + r], [x - r, y]]]);
+      }
+    }
+    return out;
+  }
+
+  // "gradstripes": wide vertical stripes whose width is shaded in many blues, bright sky blue in the
+  // middle deepening to the edges with a navy hairline on each side (Argentina 2026 home). The base
+  // colour is the white between the stripes. Kinds 0-3 = shades light to deep, 4 = edge hairline.
+  function gradStripeShapes() {
+    const out = [];
+    const K = GW > 300 ? 1.6 : 1;
+    const P = 30 * K, bw = 20 * K, ns = 20, sw = bw / ns, hl = 0.55 * K;
+    // on a card keep the left part plain so the name stays readable
+    const x0 = GW > 300 ? 2 * K : 82;
+    for (let x = x0 - (GW > 300 ? P : 0); x < GW + P; x += P) {
+      for (let j = 0; j < ns; j++) {
+        const d = Math.abs((j + 0.5) / ns - 0.5) * 2;
+        out.push([Math.min(3, Math.floor(Math.pow(d, 1.15) * 4)), 1, [[x + j * sw, -2], [x + (j + 1) * sw + 0.3, -2], [x + (j + 1) * sw + 0.3, 102], [x + j * sw, 102]]]);
+      }
+      out.push([4, 0.85, [[x, -2], [x + hl, -2], [x + hl, 102], [x, 102]]]);
+      out.push([4, 0.85, [[x + bw - hl, -2], [x + bw, -2], [x + bw, 102], [x + bw - hl, 102]]]);
+    }
+    return out;
+  }
+
+  // "leaves": baroque acanthus scrollwork in glowing blues on a near-black base, like the Argentina
+  // 2026 away shirt. Long S-shaped vines (each ends in a tight curl) carry rows of curved, feathered
+  // leaf blades on alternating sides, and every blade or vine is a layered ribbon: deep blue body,
+  // royal blue core and a thin cyan/pale highlight along one edge. Kinds: 0 = royal blue,
+  // 1 = cyan, 2 = pale highlight, 3 = deep blue.
+  function leafShapes() {
+    const out = [];
+    const rnd = seeded(26);
+    const wide = GW > 300;
+    const K = wide ? 1.25 : 1;
+    // on a card keep the left part dim so the name stays readable
+    const fadeL = x => (wide ? 1 : Math.max(0.1, Math.min(1, (x / GW - 0.3) / 0.35)));
+    // walk a curve with heading th and curvature kf(t) (radians per unit length)
+    const walk = (x, y, th, len, kf) => {
+      const n = 36, ds = len / n, pts = [[x, y, th]];
+      for (let i = 0; i < n; i++) {
+        th += kf(i / n) * ds;
+        x += Math.cos(th) * ds; y += Math.sin(th) * ds;
+        pts.push([x, y, th]);
+      }
+      return pts;
+    };
+    const ribbon = (kind, al, pts, wl, wr, ax) => {
+      const L = [], R = [], n = pts.length - 1;
+      pts.forEach((p, i) => {
+        const t = i / n, nx = -Math.sin(p[2]), ny = Math.cos(p[2]);
+        L.push([p[0] + nx * wl(t), p[1] + ny * wl(t)]);
+        R.push([p[0] - nx * wr(t), p[1] - ny * wr(t)]);
+      });
+      out.push([kind, al * fadeL(ax), L.concat(R.reverse())]);
+    };
+    // a layered ribbon: deep body, royal core, cyan edge light, pale glint
+    const layered = (pts, W, prof, a, ax, lit) => {
+      const f = (sc, side) => t => W * sc * prof(t) * side;
+      ribbon(3, 0.97 * a, pts, f(1, 0.7), f(1, 1), ax);
+      ribbon(0, 0.95 * a, pts, f(0.7, 0.5), f(0.7, 0.8), ax);
+      if (lit) {
+        ribbon(1, 0.95 * a, pts, f(0.5, 0.95), f(0.1, 0.1), ax);
+        ribbon(2, 0.8 * a, pts, f(0.18, 0.55), f(0.02, 0.02), ax);
+      }
+    };
+    const vine = (bx, by, d, S, a) => {
+      const len = S * 1.45, w = 2 * Math.PI * 0.85 / len, A = 0.034 * d;
+      const ph = rnd() * 1.2;
+      const kf = t => A * Math.cos(w * t * len + ph) + d * 0.4 * Math.pow(Math.max(0, (t - 0.74) / 0.26), 1.3);
+      const pts = walk(bx, by, -Math.PI / 2, len, kf);
+      const prof = t => 0.35 + 0.65 * (1 - t) * (1 - t) * (1 - 0.0) + (t > 0.8 ? 0 : 0);
+      layered(pts, 0.05 * S, t => Math.max(0.04, 1 - t * 1.02), a, bx, true);
+      // leaf blades along the stem, alternating sides, shrinking toward the curl
+      for (let i = 4, side = 1; i < 31; i += 3, side = -side) {
+        const t = i / 36, p = pts[i];
+        const Ll = S * (0.55 - 0.3 * t) * (0.85 + rnd() * 0.3);
+        const lead = p[2] + side * (1.0 - 0.25 * t);
+        const lk = -side * (0.02 + 0.014 * t) * (0.9 + rnd() * 0.3) * (S / 100 > 0 ? 1 : 1);
+        const curl = -side * (0.1 + 0.08 * (1 - t));
+        const bl = walk(p[0], p[1], lead, Ll, u => lk + curl * Math.pow(Math.max(0, (u - 0.6) / 0.4), 1.3));
+        const prof2 = u => Math.pow(Math.sin(Math.PI * Math.pow(u, 0.7)), 0.9) * (1 - 0.3 * u) + 0.03;
+        layered(bl, 0.15 * Ll, prof2, a, p[0], true);
+      }
+    };
+    // free scrolls: tight double spirals filling the gaps between the vines
+    const scroll = (cx, cy, R, dir, a) => {
+      const th0 = rnd() * 6.28;
+      const pts = walk(cx + Math.cos(th0) * R, cy + Math.sin(th0) * R, th0 + dir * Math.PI / 2, R * 4.4, t => dir / (R * (1 - 0.82 * t)));
+      layered(pts, 0.2 * R, t => Math.max(0.15, 1 - t * 0.8), a, cx, true);
+    };
+    for (let x = 30 * K, n = 0; x < GW + 20 * K; x += 62 * K * (0.9 + rnd() * 0.3), n++) scroll(x, 22 + rnd() * 30, (13 + rnd() * 6) * K * (wide ? 0.8 : 1), n % 2 ? 1 : -1, 0.95);
+    // back layer: larger dimmer vines for depth; front layer: the bright ones
+    for (let x = -10 * K, n = 0; x < GW + 40 * K; x += 78 * K * (0.8 + rnd() * 0.4), n++) vine(x, 116, n % 2 ? -1 : 1, 112 * K * (wide ? 0.8 : 1), 0.3);
+    for (let x = 6 * K, n = 0; x < GW + 30 * K; x += 62 * K * (0.85 + rnd() * 0.3), n++) vine(x, 108, n % 2 ? 1 : -1, 84 * K * (wide ? 0.8 : 1), 1);
+    return out;
+  }
+
+  // "flamehatch": a deep indigo shirt that fades into lavender toward the bottom, with tall jagged
+  // flame shapes rising from the hem and fine diagonal vector hatching over everything, like the
+  // Argentina 2022 away shirt. Kinds: 0 = flames, 1 = pale flame tips and light hatching, 2 = dark
+  // hatching, 3 = lavender fade.
+  function flameHatchShapes() {
+    const out = [];
+    const rnd = seeded(22);
+    const K = GW > 300 ? 1.5 : 1;
+    // vertical fade, stacked slices so the alpha builds smoothly
+    const N = 24;
+    for (let i = 0; i < N; i++) out.push([3, 0.5 * Math.pow((i + 0.5) / N, 1.4), [[-2, (i * 100) / N], [GW + 2, (i * 100) / N], [GW + 2, 102], [-2, 102]]]);
+    // flames: jagged tapering blades with a slight sway, tall and short ones overlapping
+    const flame = (x, h, w, kind, al) => {
+      const L = [], R = [], n = 14, sway = (rnd() - 0.5) * 0.5 * h * 0.3;
+      for (let i = 0; i <= n; i++) {
+        const t = i / n, y = 104 - h * t;
+        const cx = x + sway * Math.sin(t * Math.PI * 0.9) * 1.6;
+        const half = w * Math.pow(1 - t, 0.85) * (0.5 + 0.5 * (1 - t));
+        const jag = (i % 2 ? 1 : -1) * w * 0.12 * (1 - t) * (0.6 + rnd() * 0.8);
+        L.push([cx - half + jag, y]); R.push([cx + half - jag, y]);
+      }
+      out.push([kind, al, L.concat(R.reverse())]);
+    };
+    for (let x = -4 * K; x < GW + 8 * K; x += (3.4 + rnd() * 2.6) * K) {
+      const h = (28 + rnd() * rnd() * 80) * (0.6 + 0.4 * Math.min(1, GW > 300 ? 1 : 0.8));
+      flame(x, h, (5 + rnd() * 3.5) * K, 0, 0.5 + rnd() * 0.45);
+      if (rnd() < 0.7) flame(x + (rnd() - 0.5) * 2 * K, h * (0.5 + rnd() * 0.35), (2.6 + rnd() * 2) * K, 1, 0.45 + rnd() * 0.4);
+    }
+    // diagonal hatching: pale lines in the dark upper part, dark lines across the flames below
+    const step = 2.5 * K, lw = 0.55 * K, slope = 0.62;
+    for (let x0 = -110; x0 < GW + 10; x0 += step) {
+      const seg = (y0, y1, kind, al) => out.push([kind, al, [[x0 + y0 * slope, y0], [x0 + y0 * slope + lw, y0], [x0 + y1 * slope + lw, y1], [x0 + y1 * slope, y1]]]);
+      seg(-4, 62, 1, 0.22);
+      seg(34, 104, 2, 0.3);
+    }
+    return out;
+  }
+  // "flatstripes": equal-width vertical stripes in the first band colour over the base colour, kept to
+  // the right part of a card (Southampton, Sunderland and Swansea kits). Kind 0 = stripe.
+  function flatStripeShapes() {
+    const out = [];
+    const K = GW > 300 ? 1.6 : 1;
+    const P = 26 * K, bw = 13 * K;
+    const x0 = GW > 300 ? 0 : 82;
+    for (let x = x0 - (GW > 300 ? P : 0); x < GW + P; x += P) out.push([0, 1, [[x, -2], [x + bw, -2], [x + bw, 102], [x, 102]]]);
+    return out;
+  }
+
+  // "liquid": marbled liquid swirls, many overlapping wavy ribbons of varying thickness in three
+  // colours over the base colour, like the Southampton 2026/27 away shirt. Kinds 0, 1, 2 = the
+  // three band colours.
+  function liquidShapes() {
+    const out = [];
+    const rnd = seeded(41);
+    const K = GW > 300 ? 1.5 : 1;
+    const x0 = GW > 300 ? -4 : 70;
+    const fadeL = x => (GW > 300 ? 1 : Math.max(0.1, Math.min(1, (x - 70) / 40)));
+    for (let r = 0; r < 42; r++) {
+      const y0 = -12 + r * 3.1 + rnd() * 3;
+      const f1 = 0.028 + rnd() * 0.02, f2 = 0.07 + rnd() * 0.05, p1 = rnd() * 6.3, p2 = rnd() * 6.3, p3 = rnd() * 6.3;
+      const a1 = (8 + rnd() * 9) * K, a2 = (3 + rnd() * 5) * K, w0 = (2.5 + rnd() * 4) * K;
+      const top = [], bot = [];
+      for (let x = x0; x <= GW + 6; x += 3 * K) {
+        const y = y0 + a1 * Math.sin(f1 * x / K + p1) + a2 * Math.sin(f2 * x / K + p2 + y0 * 0.05);
+        const w = w0 * (0.35 + 0.9 * Math.pow(Math.sin(0.05 * x / K + p3), 2));
+        top.push([x, y - w]); bot.push([x, y + w]);
+      }
+      out.push([r % 3, 0.9 * fadeL(GW * 0.5 + (x0 - GW * 0.5)), top.concat(bot.reverse())]);
+    }
+    return out;
+  }
+  // "redpurple": wide red stripes alternating with purple-blue stripes, each purple stripe lit lighter
+  // in the middle and edged with a thin white pinstripe, like the Swansea 2026/27 away shirt. The
+  // base colour is the red. Kinds: 0 = purple, 1 = white pinstripe, 2 = lighter violet centre.
+  function redPurpleShapes() {
+    const out = [];
+    const K = GW > 300 ? 1.6 : 1;
+    const rw = 12 * K, pw = 12 * K, hl = 2.4 * K, P = rw + pw + 2 * hl;
+    const x0 = GW > 300 ? 0 : 82;
+    const rect = (x, w) => [[x, -2], [x + w, -2], [x + w, 102], [x, 102]];
+    for (let x = x0 - (GW > 300 ? P : 0); x < GW + P; x += P) {
+      const px = x + rw + hl;
+      out.push([1, 0.95, rect(x + rw, hl)]);
+      out.push([0, 1, rect(px, pw)]);
+      out.push([2, 0.22, rect(px + pw * 0.25, pw * 0.5)]);
+      out.push([1, 0.95, rect(px + pw, hl)]);
+    }
+    return out;
+  }
+
+  // "diamondfade": a vertical fade from the black base into pink, with a tone-on-tone lattice of
+  // inscribed diamonds (a diamond inside a diamond) embossed over the pink, like the Sunderland
+  // 2026/27 away shirt. Kinds: 0 = pink fade, 1 = light lattice lines, 2 = shaded lattice lines.
+  function diamondFadeShapes() {
+    const out = [];
+    const K = GW > 300 ? 1.25 : 1;
+    const N = 30;
+    for (let i = 0; i < N; i++) {
+      const y0 = i * 1.4 + 36;
+      out.push([0, 0.1, [[-2, y0], [GW + 2, y0], [GW + 2, 102], [-2, 102]]]);
+    }
+    const s = 17 * K, hd = s / 2, lw = 0.8 * K;
+    const ramp = y => Math.max(0, Math.min(1, (y - 52) / 24));
+    const seg = (kind, al, x1, y1, x2, y2) => {
+      const dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy) || 1, nx = -dy / len * lw / 2, ny = dx / len * lw / 2;
+      out.push([kind, al, [[x1 + nx, y1 + ny], [x2 + nx, y2 + ny], [x2 - nx, y2 - ny], [x1 - nx, y1 - ny]]]);
+    };
+    const diamond = (cx, cy, h, al) => {
+      const pts = [[cx, cy - h], [cx + h, cy], [cx, cy + h], [cx - h, cy]];
+      for (let i = 0; i < 4; i++) {
+        const a = pts[i], b = pts[(i + 1) % 4];
+        seg(1, 0.7 * al, a[0], a[1], b[0], b[1]);
+        seg(2, 0.5 * al, a[0] + 0.5 * K, a[1] + 0.5 * K, b[0] + 0.5 * K, b[1] + 0.5 * K);
+      }
+    };
+    for (let j = -1; j * hd < 112; j++) {
+      for (let i = -1; i * s < GW + s; i++) {
+        const cx = i * s + (j % 2 ? hd : 0), cy = j * hd;
+        const al = ramp(cy);
+        if (al < 0.05) continue;
+        diamond(cx, cy, hd, al);
+        diamond(cx, cy, hd * 0.62, al);
+        diamond(cx, cy, hd * 0.26, al);
+      }
+    }
+    return out;
+  }
+  // "glassmotif": a tone-on-tone all-over print of stained-glass ribbing on royal blue, in offset
+  // rows: pairs of overlapping oval rings around a small diamond, then rows of paired capsule ribs,
+  // like the Sunderland 2026/27 third shirt. Kinds: 0 = lighter blue, 1 = darker blue, 2 = copper.
+  function glassMotifShapes() {
+    const out = [];
+    const K = GW > 300 ? 1.9 : 1.3;
+    const cw = 30 * K, rh = 15 * K;
+    const lw = 1.3 * K;
+    const seg = (kind, al, x1, y1, x2, y2) => {
+      const dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy) || 1, nx = -dy / len * lw / 2, ny = dx / len * lw / 2;
+      out.push([kind, al, [[x1 + nx, y1 + ny], [x2 + nx, y2 + ny], [x2 - nx, y2 - ny], [x1 - nx, y1 - ny]]]);
+    };
+    const ring = (kind, al, cx, cy, rx, ry) => {
+      const n = 22;
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2, b = ((i + 1) / n) * Math.PI * 2;
+        seg(kind, al, cx + Math.cos(a) * rx, cy + Math.sin(a) * ry, cx + Math.cos(b) * rx, cy + Math.sin(b) * ry);
+      }
+    };
+    const diamond = (kind, al, cx, cy, h) => out.push([kind, al, [[cx, cy - h], [cx + h * 0.8, cy], [cx, cy + h], [cx - h * 0.8, cy]]]);
+    const capsule = (kind, al, cx, cy, w, h) => {
+      const r = w / 2, pts = [];
+      for (let i = 0; i <= 8; i++) { const a = Math.PI + (i / 8) * Math.PI; pts.push([cx + Math.cos(a) * r, cy - h / 2 + r + Math.sin(a) * r]); }
+      for (let i = 0; i <= 8; i++) { const a = (i / 8) * Math.PI; pts.push([cx + Math.cos(a) * r, cy + h / 2 - r + Math.sin(a) * r]); }
+      out.push([kind, al, pts]);
+      for (let i = 0; i < pts.length; i++) { const a = pts[i], b = pts[(i + 1) % pts.length]; seg(0, 0.6, a[0], a[1], b[0], b[1]); }
+    };
+    for (let j = -1; j * rh < 112; j++) {
+      for (let i = -1; i * cw < GW + cw; i++) {
+        const cx = i * cw + (j % 2 ? cw / 2 : 0), cy = j * rh + rh / 2;
+        if (j % 2 === 0) {
+          ring(0, 0.85, cx - 5.2 * K, cy, 7.2 * K, 4.6 * K);
+          ring(0, 0.85, cx + 5.2 * K, cy, 7.2 * K, 4.6 * K);
+          diamond(0, 0.9, cx, cy, 3.4 * K);
+          diamond(1, 0.55, cx, cy, 1.5 * K);
+        } else {
+          capsule(1, 0.5, cx - 2.6 * K, cy, 3.4 * K, 10 * K);
+          capsule(1, 0.5, cx + 2.6 * K, cy, 3.4 * K, 10 * K);
+          diamond(0, 0.6, cx - cw / 2 + 0.01, cy, 2.2 * K);
+        }
+      }
+    }
+    return out;
+  }
   const STRIPE_GEN = {
+    glassmotif: glassMotifShapes,
+    redpurple: redPurpleShapes, diamondfade: diamondFadeShapes,
+    flatstripes: flatStripeShapes, liquid: liquidShapes,
+    flamehatch: flameHatchShapes,
+    gradstripes: gradStripeShapes, leaves: leafShapes,
     crosses: () => stripeShapes("crosses"), pinlines: () => stripeShapes("pinlines"), slashes: slashShapes,
     vee: veeShapes, scatter: scatterShapes, ornament: ornamentShapes, raglan: raglanShapes,
     streaks: streakShapes, swell: swellShapes, stars: starShapes,
     bruise: bruiseShapes, pole: poleShapes, swirls: swirlShapes, ticks: tickShapes, gridiron: gridironShapes, hexes: hexShapes,
     contours: contourShapes, golden: goldenShapes, vtex: vtexShapes, skewchecks: skewcheckShapes, bees: beeShapes,
-    vbars: vbarShapes, marble: marbleShapes, rings: ringShapes, flash: flashShapes, baroque: baroqueShapes, herring: herringShapes, ripple: rippleShapes, dashes: dashShapes, weft: weftShapes, finelines: fineLineShapes, sunstone: sunstoneShapes, scrolls: scrollShapes
+    vbars: vbarShapes, marble: marbleShapes, rings: ringShapes, flash: flashShapes, baroque: baroqueShapes, herring: herringShapes, ripple: rippleShapes, dashes: dashShapes, weft: weftShapes, finelines: fineLineShapes, sunstone: sunstoneShapes, scrolls: scrollShapes, rulestripes: ruleStripeShapes, multistripes: multiStripeShapes, prism: prismShapes, railstripes: railStripeShapes, twotone: twoToneShapes, ribfade: ribFadeShapes
   };
   const STRIPE_CACHE = {};
 
@@ -1446,6 +1885,20 @@
     if (p.type === "ornament") return [b[0] || "#000000"];
     if (p.type === "stars") return [b[0] || "#FFFFFF"];
     if (p.type === "ticks") return [b[0] || "#5FD8C8", b[1] || "#FFFFFF"];
+    if (p.type === "gradstripes") return [b[0] || "#C4E9FB", b[1] || "#8FCDF2", b[2] || "#5BA9E3", b[3] || "#3A80C6", b[4] || "#12315C"];
+    if (p.type === "flamehatch") return [b[0] || "#A98BE6", b[1] || "#CDB8F6", b[2] || "#1B1560", b[3] || "#8F72DD"];
+    if (p.type === "redpurple") return [b[0] || "#3A2C9C", b[1] || "#FFFFFF", b[2] || "#6A55D0"];
+    if (p.type === "diamondfade") return [b[0] || "#F4A6C8", b[1] || "#FFD6E8", b[2] || "#C9709A"];
+    if (p.type === "glassmotif") return [b[0] || "#3A62CC", b[1] || "#12287A", b[2] || "#D98B4E"];
+    if (p.type === "flatstripes") return [b[0] || "#FFFFFF"];
+    if (p.type === "liquid") return [b[0] || "#F4A9D8", b[1] || "#8EC2F2", b[2] || "#1B2BC0"];
+    if (p.type === "leaves") return [b[0] || "#1F5FE0", b[1] || "#3DB4FF", b[2] || "#BDEBFF", b[3] || "#0F3A9C"];
+    if (p.type === "ribfade") return [b[1] || "#9A97A6", b[0] || "#6A45B8", b[2] || "#7C788A"];
+    if (p.type === "twotone") return [b[0] || "#97D7CF", b[1] || "#C4EEE8", b[2] || "#6FC4BA"];
+    if (p.type === "railstripes") return [b[0] || "#C8302A", b[1] || "#262F61", b[2] || "#8E99A8"];
+    if (p.type === "prism") return [b[0] || "#3A3D43", b[1] || b[0] || "#4A4E55"];
+    if (p.type === "multistripes") { stripeColors.cur = b.length ? b : ["#FFFFFF"]; return stripeColors.cur; }
+    if (p.type === "rulestripes") return [b[0] || "#FFFFFF", b[0] || "#FFFFFF", p.base, b[1] || "#262F61"];
     if (p.type === "scrolls") return [b[0] || "#D6C9B0"];
     if (p.type === "sunstone") return [b[0] || "#0A5547"];
     if (p.type === "finelines") return [b[0] || "#9BB1DF"];

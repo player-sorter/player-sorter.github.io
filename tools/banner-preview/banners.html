@@ -50,11 +50,24 @@
 <script>
 (function () {
   const BASE = "../../";
-  const REDESIGNED = [
-    "new-england-revolution", "west-ham-united", "leverkusen", "frankfurt", "dortmund", "cagliari",
-    "manchester-city", "liverpool", "arsenal", "fiorentina", "villarreal",
-    "2026-france", "2026-germany", "2026-brasil", "2026-usa", "2018-france"
-  ];
+  // A squad counts as "redesigned" when any of its kits uses a pattern type that is not one of the
+  // original ones, or sets a banner/card extra (headerPattern, headerStripes, headerDecor, tile
+  // options). This follows the team files, so new work shows up here without editing this list.
+  // ALWAYS_REDESIGNED is only for squads that changed in a way this cannot see.
+  const ALWAYS_REDESIGNED = [];
+  const ORIGINAL_TYPES = ["stripes", "pinstripe", "hoops", "bolts", "gradient", "fade", "split", "sleeves", "zigzag", "tipping", "lightning",
+    "dots", "triangles", "cross", "diamonds", "waves", "chevron", "checks", "sash", "band", "solid", "plain", "halves", "centreband", "thick-waves"];
+  function isRedesigned(team) {
+    if (!team) return false;
+    if (ALWAYS_REDESIGNED.indexOf(team.id) >= 0) return true;
+    const t = team.tile || {};
+    if (t.patternOpacity != null || t.border || t.name || (t.pattern && ORIGINAL_TYPES.indexOf(t.pattern.type) < 0)) return true;
+    return Kits.ids(team).some(id => {
+      const k = Kits.get(team, id);
+      const types = [(k.pattern || {}).type, (k.headerPattern || {}).type];
+      return types.some(x => x && ORIGINAL_TYPES.indexOf(x) < 0) || k.headerStripes || k.headerDecor || (k.headerPattern && k.headerPattern.type);
+    });
+  }
   const FORMATS = [["wide", "Wide 16:9"], ["story", "Story 9:16"], ["post", "Post 4:5"], ["square", "Square 1:1"]];
   const HEAD = { wide: 210, story: 340, post: 240, square: 210 };
   const SIZE = { wide: 1920, story: 1080, post: 1080, square: 1080 };
@@ -71,7 +84,8 @@
 
   const q = new URLSearchParams(location.search);
   let format = FORMATS.some(f => f[0] === q.get("format")) ? q.get("format") : "wide";
-  let sectionId = sections[0] ? sections[0].id : "";
+  let sectionId = sections.some(s => s.id === q.get("section")) ? q.get("section") : (sections[0] ? sections[0].id : "");
+  const onlyTeam = q.get("team");
   const onlyNew = document.getElementById("onlyNew");
   onlyNew.checked = q.get("only") === "new";
   const status = document.getElementById("status");
@@ -123,8 +137,16 @@
     row.dataset.done = "1";
   }
 
-  function build() {
+  async function build() {
     const mine = ++token;
+    if (onlyNew.checked) {
+      const sec = sections.find(x => x.id === sectionId) || sections[0];
+      status.textContent = "checking squads…";
+      const need = [];
+      sec.groups.forEach(g => g.teams.forEach(t => { if (!TEAMS[t.id]) need.push(loadScript(BASE + "data/teams/" + t.dir + ".js")); }));
+      await Promise.all(need);
+      if (mine !== token) return;
+    }
     out.innerHTML = "";
     const section = sections.find(s => s.id === sectionId) || sections[0];
     if (!section) return;
@@ -140,7 +162,7 @@
       });
     }, { rootMargin: "600px 0px" });
     section.groups.forEach(g => {
-      const teams = g.teams.filter(t => !onlyNew.checked || REDESIGNED.indexOf(t.id) >= 0);
+      const teams = g.teams.filter(t => (!onlyTeam || t.id === onlyTeam) && (!onlyNew.checked || isRedesigned(TEAMS[t.id])));
       if (!teams.length) return;
       const wrap = document.createElement("div");
       wrap.className = "group";

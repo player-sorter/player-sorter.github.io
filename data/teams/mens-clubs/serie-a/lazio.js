@@ -12,8 +12,8 @@ registerTeam({
       card: "#FFFFFF",
       onPaper: "#0E2A44",
       onPaperMuted: "rgba(14,42,68,0.72)",
-      paperPrimary: "#FFFFFF",
-      paperOnPrimary: "#0E2A44",
+      paperPrimary: "#0E2A44",
+      paperOnPrimary: "#FFFFFF",
       line: "rgba(0,0,0,0.16)",
       ink: "#0E2A44",
       muted: "#5B6170",
@@ -36,7 +36,7 @@ registerTeam({
       card: "#FFFFFF",
       ink: "#0E2A44",
       muted: "#5B6170",
-      primary: "#87C5E8",
+      primary: "#71A5C3",
       onPrimary: "#0E2A44",
       accent: "#0E2A44",
       onAccent: "#FFFFFF",
@@ -46,7 +46,8 @@ registerTeam({
       rowTint: "#0E2A44",
       rowTintStrength: 0.16,
       rowTintFloor: 0.5,
-      pattern: { type: "solid", base: "#F7F8FA" }
+      pattern: { type: "solid", base: "#F7F8FA" },
+      paperPrimary: "#6391AC"
     },
     third: {
       label: "Third",

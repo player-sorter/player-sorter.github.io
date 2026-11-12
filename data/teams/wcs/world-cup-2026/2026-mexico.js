@@ -17,7 +17,7 @@ registerTeam({
       line: "#EA1B32",
       ink: "#ffffff",
       muted: "#ffffffb0",
-      primary: "#EA1B32",
+      primary: "#F05B6B",
       onPrimary: "#FFFFFF",
       accent: "#FFFFFF",
       onAccent: "#0B564F",

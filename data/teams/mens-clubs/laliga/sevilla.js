@@ -16,7 +16,7 @@ registerTeam({
       paperOnPrimary: "#FFFFFF",
       ink: "#24263B",
       muted: "#55576C",
-      primary: "#cc9f52",
+      primary: "#AB8645",
       onPrimary: "#FFFFFF",
       accent: "#AE102C",
       onAccent: "#FFFFFF",
