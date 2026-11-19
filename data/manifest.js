@@ -126,7 +126,7 @@ window.SQUAD_MANIFEST = {
           id: "championship",
           name: "Championship",
           country: "England",
-          teams: ["queens-park-rangers", "west-ham-united", "wolves", "sheffield-united", "southampton", "swansea"]
+          teams: ["queens-park-rangers", "west-ham-united", "wolves", "sheffield-united", "southampton", "swansea", "middlesbrough", "norwich-city"]
         },
         {
           id: "laliga-hypermotion",
